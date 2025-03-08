@@ -8,3 +8,4 @@ docs/
 .dist_test/
 .ipynb_checkpoints/
 prepare.sh
+train.sh

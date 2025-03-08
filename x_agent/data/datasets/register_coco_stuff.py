@@ -192,7 +192,7 @@ def _get_coco_stuff_meta():
     return ret
 
 def register_all_coco_stuff_10k(root):
-    root = os.path.join(root, "coco-stuff")
+    root = os.path.join(root, "coco_stuff164k")
     meta = _get_coco_stuff_meta()
     for name, image_dirname, sem_seg_dirname in [
         ("train", "images/train2017", "annotations_detectron2/train2017"),

@@ -71,7 +71,7 @@ class VOCbEvaluator(SemSegEvaluator):
             self._predictions.extend(self.encode_json_sem_seg(pred, input["file_name"]))
 
 # MaskFormer
-from cat_seg import (
+from x_agent import (
     DETRPanopticDatasetMapper,
     MaskFormerPanopticDatasetMapper,
     MaskFormerSemanticDatasetMapper,

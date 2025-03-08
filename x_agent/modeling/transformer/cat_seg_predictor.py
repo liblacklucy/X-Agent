@@ -12,8 +12,8 @@ from detectron2.config import configurable
 from detectron2.layers import Conv2d
 
 from .model import Aggregator
-from cat_seg.third_party import clip
-from cat_seg.third_party import imagenet_templates
+from x_agent.third_party import clip
+from x_agent.third_party import imagenet_templates
 
 import numpy as np
 import open_clip
