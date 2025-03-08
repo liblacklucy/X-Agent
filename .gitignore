@@ -7,3 +7,4 @@ docs/
 **.pth
 .dist_test/
 .ipynb_checkpoints/
+prepare.sh

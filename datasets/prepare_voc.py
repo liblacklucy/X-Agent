@@ -70,7 +70,7 @@ if __name__ == "__main__":
         #os.makedirs((out_image_dir / name), exist_ok=True)
         val_list = [
             osp.join(voc_path, "SegmentationClassAug", f + ".png")
-            for f in np.loadtxt(osp.join(voc_path, "ImageSets/Segmentation/val.txt"), dtype=np.str).tolist()
+            for f in np.loadtxt(osp.join(voc_path, "ImageSets/Segmentation/val.txt"), dtype=np.str_).tolist()
         ]
         for file in tqdm.tqdm(val_list):
             convert_to_trainID(file, out_mask_dir, is_train=False)

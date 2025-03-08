@@ -181,7 +181,7 @@ COCO_CATEGORIES = [{'color': [220, 20, 60], 'isthing': 1, 'id': 0, 'name': 'pers
 
 
 if __name__ == "__main__":
-    dataset_dir = Path(os.getenv("DETECTRON2_DATASETS", "datasets")) / "coco-stuff"
+    dataset_dir = Path(os.getenv("DETECTRON2_DATASETS", "datasets")) / "coco_stuff164k"
 
     id_map = {}
     for cat in COCO_CATEGORIES:

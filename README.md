@@ -1,11 +1,3 @@
-**❗️Update:** We released the code and pre-trained weights for CVPR version of CAT-Seg! 
-Some major updates are:
-- We now solely utilize CLIP as the pre-trained encoders, without additional backbones (ResNet, Swin)!
-- We also fine-tune the text encoder of CLIP, yielding significantly improved performance!
-
-For further details, please check out our updated [paper](https://arxiv.org/abs/2303.11797).
-Note that the demos are still running on our previous version, and will be updated soon!
-
 ## :fire:TODO
 - [x] Train/Evaluation Code (Mar 21, 2023)
 - [x] Pre-trained weights (Mar 30, 2023)
