@@ -1,0 +1,9 @@
+work_dirs/
+__pycache__/
+docs/
+**.png
+**.jpg
+**.pyc
+**.pth
+.dist_test/
+.ipynb_checkpoints/
