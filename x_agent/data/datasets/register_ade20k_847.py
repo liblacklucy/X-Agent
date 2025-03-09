@@ -25,7 +25,7 @@ def _get_ade20k_full_val_all_meta_freq():
 
 
 def register_all_ade20k_full_val_all_freq(root):
-    root = os.path.join(root, "ADE20K_2021_17_01")
+    root = os.path.join(root, "ade/ADE20K_2021_17_01")
     meta = _get_ade20k_full_val_all_meta_freq()
 
     name, dirname = "val_all", "val_all"

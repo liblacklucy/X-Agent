@@ -13,7 +13,7 @@ def _get_ade20k_150_meta():
     return ret
 
 def register_ade20k_150(root):
-    root = os.path.join(root, "ADEChallengeData2016")
+    root = os.path.join(root, "ade/ADEChallengeData2016")
     meta = _get_ade20k_150_meta()
     for name, image_dirname, sem_seg_dirname in [
         ("test", "images/validation", "annotations_detectron2/validation"),

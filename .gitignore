@@ -9,3 +9,4 @@ docs/
 .ipynb_checkpoints/
 prepare.sh
 train.sh
+test.sh
