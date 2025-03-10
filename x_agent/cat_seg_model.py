@@ -54,7 +54,7 @@ class CATSeg(nn.Module):
         self.train_class_json = train_class_json
         self.test_class_json = test_class_json
 
-        self.clip_finetune = clip_finetune
+        self.clip_finetune = clip_finetune  # "attention"
         for name, params in self.sem_seg_head.predictor.clip_model.named_parameters():
             if "transformer" in name:
                 if clip_finetune == "prompt":
@@ -84,6 +84,7 @@ class CATSeg(nn.Module):
         self.layer_indexes = [3, 7] if clip_pretrained == "ViT-B/16" else [7, 15] 
         self.layers = []
         for l in self.layer_indexes:
+            # m：当前模块（即，resblocks[l]）; _：输入（通常不需要使用，因此用_忽略）; o：输出（即该模块的前向传播结果）
             self.sem_seg_head.predictor.clip_model.visual.transformer.resblocks[l].register_forward_hook(lambda m, _, o: self.layers.append(o))
 
 
@@ -95,7 +96,7 @@ class CATSeg(nn.Module):
         return {
             "backbone": backbone,
             "sem_seg_head": sem_seg_head,
-            "size_divisibility": cfg.MODEL.MASK_FORMER.SIZE_DIVISIBILITY,
+            "size_divisibility": cfg.MODEL.MASK_FORMER.SIZE_DIVISIBILITY,  # 默认配置：32
             "pixel_mean": cfg.MODEL.PIXEL_MEAN,
             "pixel_std": cfg.MODEL.PIXEL_STD,
             "clip_pixel_mean": cfg.MODEL.CLIP_PIXEL_MEAN,
@@ -146,14 +147,14 @@ class CATSeg(nn.Module):
         clip_images_resized = F.interpolate(clip_images.tensor, size=self.clip_resolution, mode='bilinear', align_corners=False, )
         clip_features = self.sem_seg_head.predictor.clip_model.encode_image(clip_images_resized, dense=True)
 
-        image_features = clip_features[:, 1:, :]
+        image_features = clip_features[:, 1:, :]  # w/o [CLS] TOKEN
 
         # CLIP ViT features for guidance
         res3 = rearrange(image_features, "B (H W) C -> B C H W", H=24)
         res4 = rearrange(self.layers[0][1:, :, :], "(H W) B C -> B C H W", H=24)
         res5 = rearrange(self.layers[1][1:, :, :], "(H W) B C -> B C H W", H=24)
-        res4 = self.upsample1(res4)
-        res5 = self.upsample2(res5)
+        res4 = self.upsample1(res4)  # up 2x
+        res5 = self.upsample2(res5)  # up 4x
         features = {'res5': res5, 'res4': res4, 'res3': res3,}
 
         outputs = self.sem_seg_head(clip_features, features)
@@ -175,7 +176,7 @@ class CATSeg(nn.Module):
 
         else:
             outputs = outputs.sigmoid()
-            image_size = clip_images.image_sizes[0]
+            image_size = clip_images.image_sizes[0]  # ori size
             height = batched_inputs[0].get("height", image_size[0])
             width = batched_inputs[0].get("width", image_size[1])
 

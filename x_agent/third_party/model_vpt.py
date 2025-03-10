@@ -220,9 +220,9 @@ class ResidualAttentionBlock(nn.Module):
         y = y.reshape(L, N, 3, D // 3).permute(2, 1, 0, 3).reshape(3 * N, L, D // 3)
         y = F.linear(y, self.attn.out_proj.weight, self.attn.out_proj.bias)
         
-        q, k, v = y.tensor_split(3, dim=0)
+        q, k, v = y.tensor_split(3, dim=0)  # N L D
         
-        v = v.transpose(1, 0) + x[:1] # L N D
+        v = v.transpose(1, 0) + x[:1] # L N D TODO：为啥是切片不是x？仅仅残差链接[CLS]token？
 
         v = v + self.mlp(self.ln_2(v))
         

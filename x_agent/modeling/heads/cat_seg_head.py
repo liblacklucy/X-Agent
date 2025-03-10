@@ -47,7 +47,7 @@ class CATSegHead(nn.Module):
         return {
             "ignore_value": cfg.MODEL.SEM_SEG_HEAD.IGNORE_VALUE,
             "num_classes": cfg.MODEL.SEM_SEG_HEAD.NUM_CLASSES,
-            "feature_resolution": cfg.MODEL.SEM_SEG_HEAD.FEATURE_RESOLUTION,
+            "feature_resolution": cfg.MODEL.SEM_SEG_HEAD.FEATURE_RESOLUTION,  # input size // patch size
             "transformer_predictor": CATSegPredictor(
                 cfg,
             ),
