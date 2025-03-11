@@ -192,7 +192,7 @@ class SwinTransformerBlock(nn.Module):
         x = x.view(B, H, W, C)
         if appearance_guidance is not None:
             appearance_guidance = appearance_guidance.view(B, H, W, -1)
-            x = torch.cat([x, appearance_guidance], dim=-1)
+            x = torch.cat([x, appearance_guidance], dim=-1)  # [B, H, W, 2C]
 
         # cyclic shift
         if self.shift_size > 0:
@@ -244,9 +244,9 @@ class SwinTransformerBlockWrapper(nn.Module):
         """
         B, C, T, H, W = x.shape
         
-        x = rearrange(x, 'B C T H W -> (B T) (H W) C')
+        x = rearrange(x, 'B C T H W -> (B T) (H W) C')  # [b*cls, h*w, 128]
         if appearance_guidance is not None:
-            appearance_guidance = self.guidance_norm(repeat(appearance_guidance, 'B C H W -> (B T) (H W) C', T=T))
+            appearance_guidance = self.guidance_norm(repeat(appearance_guidance, 'B C H W -> (B T) (H W) C', T=T))  # [b*cls, h*w, 128]
         x = self.block_1(x, appearance_guidance)
         x = self.block_2(x, appearance_guidance)
         x = rearrange(x, '(B T) (H W) C -> B C T H W', B=B, T=T, H=H, W=W)
@@ -391,7 +391,7 @@ class ClassTransformerLayer(nn.Module):
             guidance: B, T, C
         """
         B, C, T, H, W = x.size()
-        x_pool = self.pool_features(x)
+        x_pool = self.pool_features(x)  # down 2x
         *_, H_pool, W_pool = x_pool.size()
         
         if self.padding_tokens is not None:
@@ -401,19 +401,19 @@ class ClassTransformerLayer(nn.Module):
                 padding_tokens = repeat(self.padding_tokens, '1 1 C -> B C T H W', B=B, T=self.pad_len - orig_len, H=H_pool, W=W_pool)
                 x_pool = torch.cat([x_pool, padding_tokens], dim=2)
 
-        x_pool = rearrange(x_pool, 'B C T H W -> (B H W) T C')
+        x_pool = rearrange(x_pool, 'B C T H W -> (B H W) T C')  # [b*h*w//4, pad_len, 128]
         if guidance is not None:
             if self.padding_guidance is not None:
                 if orig_len < self.pad_len:
                     padding_guidance = repeat(self.padding_guidance, '1 1 C -> B T C', B=B, T=self.pad_len - orig_len)
                     guidance = torch.cat([guidance, padding_guidance], dim=1)
-            guidance = repeat(guidance, 'B T C -> (B H W) T C', H=H_pool, W=W_pool)
+            guidance = repeat(guidance, 'B T C -> (B H W) T C', H=H_pool, W=W_pool)  # [b, pad_len, 128] -> [b*h*w//4, pad_len, 128]
 
         x_pool = x_pool + self.attention(self.norm1(x_pool), guidance) # Attention
         x_pool = x_pool + self.MLP(self.norm2(x_pool)) # MLP
 
         x_pool = rearrange(x_pool, '(B H W) T C -> (B T) C H W', H=H_pool, W=W_pool)
-        x_pool = F.interpolate(x_pool, size=(H, W), mode='bilinear', align_corners=True)
+        x_pool = F.interpolate(x_pool, size=(H, W), mode='bilinear', align_corners=True)  # up 2x
         x_pool = rearrange(x_pool, '(B T) C H W -> B C T H W', B=B)
 
         if self.padding_tokens is not None:
@@ -488,7 +488,9 @@ class AggregatorLayer(nn.Module):
     def forward(self, x, appearance_guidance, text_guidance):
         """
         Arguments:
-            x: B C T H W
+            x: B C T H W. cost volume
+            appearance_guidance: B C H W, C is hidden dims.
+            text_guidance: B pad_len C
         """
         x = self.swin_block(x, appearance_guidance)
         x = self.attention(x, text_guidance)
@@ -613,21 +615,21 @@ class Aggregator(nn.Module):
         self.conv1 = nn.Conv2d(prompt_channel, hidden_dim, kernel_size=7, stride=1, padding=3)
 
         self.guidance_projection = nn.Sequential(
-            nn.Conv2d(appearance_guidance_dim, appearance_guidance_proj_dim, kernel_size=3, stride=1, padding=1),
+            nn.Conv2d(appearance_guidance_dim, appearance_guidance_proj_dim, kernel_size=3, stride=1, padding=1),  # 将CLIP输出的维度（512，768）降维到128
             nn.ReLU(),
         ) if appearance_guidance_dim > 0 else None
         
         self.text_guidance_projection = nn.Sequential(
-            nn.Linear(text_guidance_dim, text_guidance_proj_dim),
+            nn.Linear(text_guidance_dim, text_guidance_proj_dim),  # 将CLIP输出的维度（512，768）降维到128
             nn.ReLU(),
         ) if text_guidance_dim > 0 else None
 
         self.decoder_guidance_projection = nn.ModuleList([
             nn.Sequential(
-                nn.Conv2d(d, dp, kernel_size=3, stride=1, padding=1),
+                nn.Conv2d(d, dp, kernel_size=3, stride=1, padding=1),  # 256 -> 32; 128 -> 16
                 nn.ReLU(),
             ) for d, dp in zip(decoder_guidance_dims, decoder_guidance_proj_dims)
-        ]) if decoder_guidance_dims[0] > 0 else None
+        ]) if decoder_guidance_dims[0] > 0 else None  # 应用于CLIP中间的两个视觉特征
 
         self.decoder1 = Up(hidden_dim, decoder_dims[0], decoder_guidance_proj_dims[0])
         self.decoder2 = Up(decoder_dims[0], decoder_dims[1], decoder_guidance_proj_dims[1])
@@ -654,7 +656,7 @@ class Aggregator(nn.Module):
     def corr_embed(self, x):
         B = x.shape[0]
         corr_embed = rearrange(x, 'B P T H W -> (B T) P H W')
-        corr_embed = self.conv1(corr_embed)
+        corr_embed = self.conv1(corr_embed)  # [b*cls, dim, h, w]
         corr_embed = rearrange(corr_embed, '(B T) C H W -> B C T H W', B=B)
         return corr_embed
     
@@ -685,33 +687,33 @@ class Aggregator(nn.Module):
         Arguments:
             img_feats: (B, C, H, W)
             text_feats: (B, T, P, C)
-            apperance_guidance: tuple of (B, C, H, W)
+            apperance_guidance: tuple of (B, C, H, W), 1x, 512/768 -> 2x, 256 -> 4x, 128
         """
         classes = None
 
-        corr = self.correlation(img_feats, text_feats)
-        if self.pad_len > 0 and text_feats.size(1) > self.pad_len:
-            avg = corr.permute(0, 2, 1, 3, 4).flatten(-3).max(dim=-1)[0] 
-            classes = avg.topk(self.pad_len, dim=-1, sorted=False)[1]
+        corr = self.correlation(img_feats, text_feats)  # 公式1 [b, p, cls, h, w]
+        if self.pad_len > 0 and text_feats.size(1) > self.pad_len:  # 类别截断
+            avg = corr.permute(0, 2, 1, 3, 4).flatten(-3).max(dim=-1)[0]  # [b, p, cls, h, w] -> [b, cls, p, h, w] -> [b, cls, p*h*w] -> [b, cls]
+            classes = avg.topk(self.pad_len, dim=-1, sorted=False)[1]  # [b, pad_len]
             th_text = F.normalize(text_feats, dim=-1)
-            th_text = torch.gather(th_text, dim=1, index=classes[..., None, None].expand(-1, -1, th_text.size(-2), th_text.size(-1)))
+            th_text = torch.gather(th_text, dim=1, index=classes[..., None, None].expand(-1, -1, th_text.size(-2), th_text.size(-1)))  # [b, pad_len, p, C]
             orig_clases = text_feats.size(1)
             img_feats = F.normalize(img_feats, dim=1) # B C H W
             text_feats = th_text
             corr = torch.einsum('bchw, btpc -> bpthw', img_feats, th_text)
         #corr = self.feature_map(img_feats, text_feats)
-        corr_embed = self.corr_embed(corr)
+        corr_embed = self.corr_embed(corr)  # [b, 128, cls, h, w]
 
         projected_guidance, projected_text_guidance, projected_decoder_guidance = None, None, [None, None]
         if self.guidance_projection is not None:
-            projected_guidance = self.guidance_projection(appearance_guidance[0])
+            projected_guidance = self.guidance_projection(appearance_guidance[0])  # [b, 128, h, w]
         if self.decoder_guidance_projection is not None:
-            projected_decoder_guidance = [proj(g) for proj, g in zip(self.decoder_guidance_projection, appearance_guidance[1:])]
+            projected_decoder_guidance = [proj(g) for proj, g in zip(self.decoder_guidance_projection, appearance_guidance[1:])]  # [b, 32, h//2, w//2] [b, 16, h//4, w//4]
 
         if self.text_guidance_projection is not None:
-            text_feats = text_feats.mean(dim=-2)
+            text_feats = text_feats.mean(dim=-2)  # [b, pad_len, C]
             text_feats = text_feats / text_feats.norm(dim=-1, keepdim=True)
-            projected_text_guidance = self.text_guidance_projection(text_feats)
+            projected_text_guidance = self.text_guidance_projection(text_feats)  # [b, pad_len, 128]
 
         for layer in self.layers:
             corr_embed = layer(corr_embed, projected_guidance, projected_text_guidance)

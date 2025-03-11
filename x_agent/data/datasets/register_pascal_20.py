@@ -50,4 +50,4 @@ def register_all_pascal_voc_background(root):
 
 _root = os.getenv("DETECTRON2_DATASETS", "datasets")
 register_all_pascal_voc(_root)
-#register_all_pascal_voc_background(_root)
+register_all_pascal_voc_background(_root)

@@ -153,8 +153,8 @@ class CATSeg(nn.Module):
         res3 = rearrange(image_features, "B (H W) C -> B C H W", H=24)
         res4 = rearrange(self.layers[0][1:, :, :], "(H W) B C -> B C H W", H=24)
         res5 = rearrange(self.layers[1][1:, :, :], "(H W) B C -> B C H W", H=24)
-        res4 = self.upsample1(res4)  # up 2x
-        res5 = self.upsample2(res5)  # up 4x
+        res4 = self.upsample1(res4)  # up 2x, 256
+        res5 = self.upsample2(res5)  # up 4x, 128
         features = {'res5': res5, 'res4': res4, 'res3': res3,}
 
         outputs = self.sem_seg_head(clip_features, features)

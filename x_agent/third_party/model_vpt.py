@@ -222,7 +222,7 @@ class ResidualAttentionBlock(nn.Module):
         
         q, k, v = y.tensor_split(3, dim=0)  # N L D
         
-        v = v.transpose(1, 0) + x[:1] # L N D TODO：为啥是切片不是x？仅仅残差链接[CLS]token？
+        v = v.transpose(1, 0) + x[:1] # L N D 仅仅残差链接[CLS]token，没有加权注意力,MaskCLIP的处理
 
         v = v + self.mlp(self.ln_2(v))
         
@@ -249,7 +249,7 @@ class Transformer(nn.Module):
             if self.prompt_length > 0 and i < self.prompt_depth:
                 x = torch.cat((x[0:1, :, :], self.prompt_tokens[i].repeat(x.shape[1], 1, 1).permute(1, 0, 2) ,x[1:, :, :]))
             
-            if i == self.layers - 1 and dense:
+            if i == self.layers - 1 and dense:  # 最后一层的处理
                 x = resblock.forward_dense(x, self.prompt_length)    
             else:
                 x = resblock(x, self.prompt_length)
