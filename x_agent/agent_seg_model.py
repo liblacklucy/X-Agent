@@ -1,6 +1,7 @@
 # Copyright (c) Facebook, Inc. and its affiliates.
 from typing import Tuple
 import functools
+import logging
 import torch
 from torch import nn
 from torch.nn import functional as F
@@ -14,6 +15,7 @@ from detectron2.utils.memory import _ignore_torch_cuda_oom
 from einops import rearrange
 
 from .modeling.backbone.agent import X_Agent, LoRAX_Agent
+from .utils.utils import *
 
 
 @META_ARCH_REGISTRY.register()
@@ -53,6 +55,7 @@ class AGENTSeg(nn.Module):
         self.register_buffer("clip_pixel_std", torch.Tensor(clip_pixel_std).view(-1, 1, 1), False)
         self.train_class_json = train_class_json
         self.test_class_json = test_class_json
+        # logger = logging.getLogger(__name__)
         self.clip_finetune = clip_finetune  # "attention"
         for name, params in self.sem_seg_head.predictor.clip_model.named_parameters():
             if "transformer" in name:
@@ -78,10 +81,10 @@ class AGENTSeg(nn.Module):
         self.upsample1 = nn.ConvTranspose2d(self.proj_dim, 256, kernel_size=2, stride=2)
         self.upsample2 = nn.ConvTranspose2d(self.proj_dim, 128, kernel_size=4, stride=4)
         self.layer_indexes = [3, 7] if clip_pretrained == "ViT-B/16" else [7, 15] 
-        self.agent = LoRAX_Agent(
+        self.agent = X_Agent(
             num_layers = len(self.layer_indexes),
             patch_size = 16 if clip_pretrained == "ViT-B/16" else 14,  # 16 for ViT-B/16 | 14 for ViT-L/14@336px
-            agent_length = 10,
+            agent_length = 100,
             embed_dims = 768 if clip_pretrained == "ViT-B/16" else 1024,  # 768 for ViT-B/16 | 1024 for ViT-L/14@336px
             query_dims = 128,
             use_softmax = True,
@@ -96,7 +99,7 @@ class AGENTSeg(nn.Module):
             # m：当前模块（即，resblocks[l]）; _：输入（通常不需要使用，因此用_忽略）; o：输出（即该模块的前向传播结果）
             self.sem_seg_head.predictor.clip_model.visual.transformer.resblocks[l].register_forward_hook(lambda m, _, o: self.layers.append(o))
             all_agent_forward_func = functools.partial(  # 闭包
-                self.agent.forward,
+                self.agent.forward_v2,
                 text_feats=[self.sem_seg_head.predictor.text_features, self.sem_seg_head.predictor.text_features_test],
                 layer=i,
                 h=24,
@@ -126,6 +129,11 @@ class AGENTSeg(nn.Module):
             "backbone_multiplier": cfg.SOLVER.BACKBONE_MULTIPLIER,
             "clip_pretrained": cfg.MODEL.SEM_SEG_HEAD.CLIP_PRETRAINED,
         }
+
+    def train(self, mode: bool = True):
+        if not mode:
+            return super().train(mode)
+        log_requires_grad(self)
 
     @property
     def device(self):

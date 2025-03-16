@@ -51,8 +51,8 @@ class X_Agent(nn.Module):
         )
         # self.transform = nn.Linear(self.embed_dims, self.query_dims)
         # self.merge = nn.Linear(self.query_dims * 3, self.query_dims)
-        self.agent = nn.Parameter(torch.empty([self.num_layers, self.agent_length, self.embed_dims]))
-        nn.init.uniform_(self.agent.data, -val, val)
+        # self.agent = nn.Parameter(torch.empty([self.num_layers, self.agent_length, self.embed_dims]))  # TODO: for froward
+        # nn.init.uniform_(self.agent.data, -val, val)
         self.agent_scale = nn.Parameter(torch.tensor(self.scale_init))
         # self.metric_scale = nn.Parameter(torch.tensor(self.scale_init))
         self.agent_proj_1 = nn.Linear(self.embed_dims, self.embed_dims)
@@ -183,6 +183,7 @@ class X_Agent(nn.Module):
     def forward(
         self, m: nn.Module, input: Tensor, output:Tensor, text_feats: Tensor, layer: int, h: float=None, w: float=None, batch_first=False, has_cls_token=True
     ) -> Tensor:
+        """采取可学习的agent"""
         text_feat = text_feats[0]  # [cls, P, text_dim] P为模板个数
         if not m.training:  # 测试模式
             text_feat = text_feats[1]
@@ -197,6 +198,68 @@ class X_Agent(nn.Module):
         agent = agent.expand(bs, -1, -1)
         text_feat = text_feat.expand(bs, -1, -1, -1)  # [bs, cls, P, text_dim]
         text_emb = self.proj_text(text_feat)  # [bs, cls, embed_dims]
+        agent_mask = self.agent_mask(agent, output, text_emb)
+        delta_feat, _ = self.agent_attention(agent_mask, output, text_emb)  # shape: [h*w, batch, embed_dims]
+        output = output + delta_feat * self.agent_scale
+        # distance = self.calculate_metrics(attn, int(h*w/2), h, w)  # shape: [batch, hw, hw]
+        if has_cls_token:
+            output = torch.cat([cls_token, output], dim=0)  # shape: [1+h*w, batch, embed_dims]
+        if batch_first:
+            output = output.permute(1, 0, 2)
+        return output
+    
+    @torch.no_grad()
+    def get_agent(self, m: nn.Module, input: Tensor, text_emb: Tensor, h: float, w: float, K: int=10, Q: int=4, batch_first=False, has_cls_token=True) -> Tensor:
+        if batch_first:
+            input = input.permute(1, 0, 2)  # shape: [1+h*w, batch, embed_dims]
+        if has_cls_token:
+            cls_token, input = torch.tensor_split(input, [1], dim=0)
+        if m.attn.in_proj_weight is not None:
+            y = F.linear(input, m.attn.in_proj_weight, m.attn.in_proj_bias)
+        else:
+            proj = torch.cat((m.attn.q_proj_weight, m.attn.k_proj_weight, m.attn.v_proj_weight), dim=0)
+            y = F.linear(input, proj, m.attn.in_proj_bias)
+        L, N, D = y.shape  # [h*w, batch, 3*embed_dims]
+        y = y.reshape(L, N, 3, D // 3).permute(2, 1, 0, 3).reshape(3 * N, L, D // 3)    
+        q, k, v = y.tensor_split(3, dim=0)  # [batch, h*w, embed_dims]
+        metric_feature = k  # 采取K作为相似度衡量
+        affinity = torch.einsum('bld,bcd->blc', metric_feature, text_emb)  # [batch, h*w, cls]
+        if self.use_softmax:
+            affinity = F.softmax(affinity, dim=-1)
+        cls_affinity = affinity.mean(dim=1)  # [batch, cls]
+        K = min(text_emb.size(1), K)
+        _, topk_cls = torch.topk(cls_affinity, K, dim=-1, sorted=False)  # [batch, K]
+        selected_affinity = torch.gather(affinity, dim=-1, index=topk_cls.unsqueeze(1).expand(-1, L, K))  # [batch, hw, K]
+        _, indices = torch.topk(selected_affinity, Q, dim=1, largest=False)  # [batch, Q, K]
+        candidates = indices.reshape(N, -1)  # [batch, Q*K]
+        agent = torch.gather(v, dim=1, index=candidates.unsqueeze(-1).expand(-1, -1, metric_feature.size(2)))  # [batch, Q*K, embed_dims]  由于agent中可能存在重叠位置，需要在agent计算中引入mask TODO：从q,k,v,input中选择
+        mask = torch.zeros((N, K*Q), dtype=torch.bool, device=affinity.device)  # [batch, Q*K]
+        for i in range(N):
+            counts = torch.bincount(candidates[i], minlength=L)
+            mask[i] = (counts[candidates[i]] > 1)
+        agent = torch.where(mask.unsqueeze(-1).expand(-1, -1, agent.size(2)), torch.tensor(float('0.0'), device=agent.device), agent)
+        if has_cls_token:
+            input = torch.cat([cls_token, input], dim=0)  # shape: [1+h*w, batch, embed_dims]
+        if batch_first:
+            input = input.permute(1, 0, 2)
+        return agent
+
+    def forward_v2(
+        self, m: nn.Module, input, output:Tensor, text_feats: Tensor, layer: int, h: float=None, w: float=None, batch_first=False, has_cls_token=True
+    ) -> Tensor:
+        """采取与文本特征注意力计算agent"""
+        assert has_cls_token, "Agent need cls token."
+        text_feat = text_feats[0]  # [cls, P, text_dim] P为模板个数
+        if not m.training:  # 测试模式
+            text_feat = text_feats[1]
+        if batch_first:
+            output = output.permute(1, 0, 2)  # shape: [1+h*w, batch, embed_dims]
+        if has_cls_token:
+            cls_token, output = torch.tensor_split(output, [1], dim=0)
+        _, bs, _ = output.shape
+        text_feat = text_feat.expand(bs, -1, -1, -1)  # [bs, cls, P, text_dim]
+        text_emb = self.proj_text(text_feat)  # [bs, cls, embed_dims]
+        agent = self.get_agent(m, input[0], text_emb, h, w, K=10, Q=4, batch_first=batch_first, has_cls_token=has_cls_token)  # shape: [batch, agent_length, embed_dims]
         agent_mask = self.agent_mask(agent, output, text_emb)
         delta_feat, _ = self.agent_attention(agent_mask, output, text_emb)  # shape: [h*w, batch, embed_dims]
         output = output + delta_feat * self.agent_scale
@@ -229,7 +292,6 @@ class LoRAX_Agent(X_Agent):
         nn.init.uniform_(self.agent_b.data, -val, val)
 
     def get_tokens(self, layer: int) -> Tensor:
-        """返回Reins中的T和agent"""
         if layer == -1:
             return self.agent_a @ self.agent_b
         else:

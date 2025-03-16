@@ -176,7 +176,7 @@ class Attention(nn.MultiheadAttention):
         self.v_proj_weight = nn.Parameter(v)
         self.in_proj_weight = None
     
-    def forward(self, *args, **kwargs):
+    def forward(self, *args, **kwargs):  # 4
         return super().forward(*args, **kwargs)
 
         
@@ -200,7 +200,7 @@ class ResidualAttentionBlock(nn.Module):
         self.attn_mask = self.attn_mask.to(dtype=x.dtype, device=x.device) if self.attn_mask is not None else None
         return self.attn(x, x, x, need_weights=False, attn_mask=self.attn_mask)[0]
 
-    def forward(self, x: torch.Tensor, prompt=None):
+    def forward(self, x: torch.Tensor, prompt=None):  # 3
         x = x + self.attention(self.ln_1(x))
         x = x + self.mlp(self.ln_2(x))
         if prompt is not None:
@@ -244,7 +244,7 @@ class Transformer(nn.Module):
         if self.prompt_tokens is not None:
             nn.init.xavier_uniform_(self.prompt_tokens)
 
-    def forward(self, x: torch.Tensor, dense=False, prompt=None):
+    def forward(self, x: torch.Tensor, dense=False, prompt=None):  # 2
         for i, resblock in enumerate(self.resblocks):
             if self.prompt_length > 0 and i < self.prompt_depth:
                 x = torch.cat((x[0:1, :, :], self.prompt_tokens[i].repeat(x.shape[1], 1, 1).permute(1, 0, 2) ,x[1:, :, :]))
@@ -276,7 +276,7 @@ class VisualTransformer(nn.Module):
         self.patch_size = patch_size
         self.input_resolution = input_resolution
 
-    def forward(self, x: torch.Tensor, dense=False):
+    def forward(self, x: torch.Tensor, dense=False):  # 1
         x = self.conv1(x)  # shape = [*, width, grid, grid]
         x = x.reshape(x.shape[0], x.shape[1], -1)  # shape = [*, width, grid ** 2]
         x = x.permute(0, 2, 1)  # shape = [*, grid ** 2, width]
