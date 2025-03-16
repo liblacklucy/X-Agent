@@ -91,6 +91,7 @@ class AGENTSeg(nn.Module):
             link_token_to_query = True,
             scale_init = 0.001,
             text_dim = 512 if clip_pretrained == "ViT-B/16" else 768,  # 512 for ViT-B/16 | 768 for ViT-L/14@336px
+            num_heads = 8,  # 8 for ViT-B/16 | 16 for ViT-L/14@336px
             ot = False,
         )
         self.layers = []
@@ -109,6 +110,7 @@ class AGENTSeg(nn.Module):
             )
             self.sem_seg_head.predictor.clip_model.visual.transformer.resblocks[l].register_forward_hook(all_agent_forward_func)
             i += 1
+        log_requires_grad(self)
 
     @classmethod
     def from_config(cls, cfg):
@@ -129,11 +131,6 @@ class AGENTSeg(nn.Module):
             "backbone_multiplier": cfg.SOLVER.BACKBONE_MULTIPLIER,
             "clip_pretrained": cfg.MODEL.SEM_SEG_HEAD.CLIP_PRETRAINED,
         }
-
-    def train(self, mode: bool = True):
-        if not mode:
-            return super().train(mode)
-        log_requires_grad(self)
 
     @property
     def device(self):

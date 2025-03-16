@@ -10,9 +10,6 @@ first_set_train = True
 
 
 def log_requires_grad(model: nn.Module):
-    """
-    notice:key in name!
-    """
     requires_grad_names = []
     num_params = 0
     num_trainable = 0

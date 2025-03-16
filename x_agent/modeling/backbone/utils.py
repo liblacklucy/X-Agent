@@ -1,3 +1,4 @@
+from collections import OrderedDict
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -163,4 +164,83 @@ class MLP(nn.Module):
     def forward(self, x):
         for i, layer in enumerate(self.layers):
             x = F.relu(layer(x)) if i < self.num_layers - 1 else layer(x)
+        return x
+    
+
+class CrossAttention(nn.Module):
+    def __init__(self, embed_dim, num_heads):
+        super(CrossAttention, self).__init__()
+        self.embed_dim = embed_dim
+        self.num_heads = num_heads
+        self.head_dim = embed_dim // num_heads
+        
+        if self.head_dim * num_heads != embed_dim:
+            raise ValueError("embed_dim must be divisible by num_heads")
+        
+        self.query_proj = nn.Linear(embed_dim, embed_dim)
+        self.key_proj = nn.Linear(embed_dim, embed_dim)
+        self.value_proj = nn.Linear(embed_dim, embed_dim)
+        self.out_proj = nn.Linear(embed_dim, embed_dim)
+        self.scale_factor = torch.sqrt(torch.tensor(self.head_dim, dtype=torch.float32))
+    
+    def forward(self, query, key, value):
+        batch_size = query.size(0)
+        query = self.query_proj(query).view(batch_size, -1, self.num_heads, self.head_dim).transpose(1, 2)
+        key = self.key_proj(key).view(batch_size, -1, self.num_heads, self.head_dim).transpose(1, 2)
+        value = self.value_proj(value).view(batch_size, -1, self.num_heads, self.head_dim).transpose(1, 2)
+        scores = torch.matmul(query, key.transpose(-2, -1)) / self.scale_factor
+        attn_weights = F.softmax(scores, dim=-1)
+        context = torch.matmul(attn_weights, value)
+        context = context.transpose(1, 2).contiguous().view(batch_size, -1, self.embed_dim)
+        output = self.out_proj(context)
+        
+        return output
+
+
+class ResidualCrossAttentionBlock(nn.Module):
+    def __init__(self, d_model: int, n_head: int, attn_mask: torch.Tensor = None):
+        super().__init__()
+        self.cross_attn = nn.MultiheadAttention(d_model, n_head)
+        self.ln_1 = nn.LayerNorm(d_model)
+        self.mlp = nn.Sequential(OrderedDict([
+            ("c_fc", nn.Linear(d_model, d_model * 4)),
+            ("gelu", nn.GELU()),
+            ("c_proj", nn.Linear(d_model * 4, d_model))
+        ]))
+        self.ln_2 = nn.LayerNorm(d_model)
+        self.attn_mask = attn_mask
+
+    def cross_attention(self, x: torch.Tensor, context: torch.Tensor):
+        self.attn_mask = self.attn_mask.to(dtype=x.dtype, device=x.device) if self.attn_mask is not None else None
+        return self.cross_attn(x, context, context, need_weights=False, attn_mask=self.attn_mask)[0]
+
+    def forward(self, x: torch.Tensor, context: torch.Tensor):
+        x = x + self.cross_attention(self.ln_1(x), context)
+        x = x + self.mlp(self.ln_2(x))
+        return x
+    
+
+class ResidualAgentAttentionBlock(nn.Module):
+    def __init__(self, d_model: int, n_head: int, attn_mask: torch.Tensor = None):
+        super().__init__()
+        self.cross_attn_1 = nn.MultiheadAttention(d_model, n_head)
+        self.cross_attn_2 = nn.MultiheadAttention(d_model, n_head)
+        self.ln_1 = nn.LayerNorm(d_model)
+        self.ln_2 = nn.LayerNorm(d_model)
+        self.mlp = nn.Sequential(OrderedDict([
+            ("c_fc", nn.Linear(d_model, d_model * 4)),
+            ("gelu", nn.GELU()),
+            ("c_proj", nn.Linear(d_model * 4, d_model))
+        ]))
+        self.ln_3 = nn.LayerNorm(d_model)
+        self.attn_mask = attn_mask
+
+    def cross_attention(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, cross_attn: nn.MultiheadAttention):
+        self.attn_mask = self.attn_mask.to(dtype=q.dtype, device=q.device) if self.attn_mask is not None else None
+        return cross_attn(q, k, v, need_weights=False, attn_mask=self.attn_mask)[0]
+
+    def forward(self, agent: torch.Tensor, text: torch.Tensor, vis: torch.Tensor):
+        v = agent + self.ln_1(self.cross_attention(agent, text, text, self.cross_attn_1))
+        x = vis + self.ln_2(self.cross_attention(vis, agent, v, self.cross_attn_2))
+        x = x + self.mlp(self.ln_3(x))
         return x

@@ -22,6 +22,7 @@ class X_Agent(nn.Module):
         link_token_to_query: bool = True,
         scale_init: float = 0.001,
         text_dim: int = 512,  # 512 for ViT-B/16 | 768 for ViT-L/14@336px
+        num_heads: int = 8,  # 8 for ViT-B/16 | 16 for ViT-L/14@336px
         ot: bool = False,
     ) -> None:
         super().__init__()
@@ -34,6 +35,7 @@ class X_Agent(nn.Module):
         self.link_token_to_query = link_token_to_query
         self.scale_init = scale_init
         self.text_dim = text_dim
+        self.num_heads = num_heads
         self.create_model()
         self.sinkhornkeops = None
         if ot:
@@ -55,15 +57,16 @@ class X_Agent(nn.Module):
         # nn.init.uniform_(self.agent.data, -val, val)
         self.agent_scale = nn.Parameter(torch.tensor(self.scale_init))
         # self.metric_scale = nn.Parameter(torch.tensor(self.scale_init))
-        self.agent_proj_1 = nn.Linear(self.embed_dims, self.embed_dims)
-        nn.init.kaiming_uniform_(self.agent_proj_1.weight, a=math.sqrt(5))
-        self.agent_proj_2 = nn.Linear(self.embed_dims, self.embed_dims)
-        nn.init.kaiming_uniform_(self.agent_proj_2.weight, a=math.sqrt(5))
+        # self.agent_proj_1 = nn.Linear(self.embed_dims, self.embed_dims)  # TODO: for froward
+        # nn.init.kaiming_uniform_(self.agent_proj_1.weight, a=math.sqrt(5))  # TODO: for froward
+        # self.agent_proj_2 = nn.Linear(self.embed_dims, self.embed_dims)  # TODO: for froward
+        # nn.init.kaiming_uniform_(self.agent_proj_2.weight, a=math.sqrt(5))  # TODO: for froward
         self.mask_pooling = AgentMaskPooling(self.embed_dims)
         self.mlp_text = nn.Sequential(
             nn.Linear(self.text_dim, self.embed_dims),
             nn.ReLU(),
         )
+        self.agent_attn = ResidualAgentAttentionBlock(self.embed_dims, self.num_heads)  # TODO：for forward_v2
         
     # def return_auto(self, feats):
     #     if self.link_token_to_query:
@@ -147,6 +150,14 @@ class X_Agent(nn.Module):
             delta_feat = torch.einsum('bna,bad->bnd', attn, v)
             delta_feat = self.agent_proj_2(delta_feat)
         return delta_feat.permute(1, 0, 2),  attn.detach() # shape: [h*w, batch, embed_dims], [bs, hw, a]
+    
+    def agent_attention_v2(self, agent: Tensor, feats: Tensor, text: Tensor, scale: float=None) -> Tensor:
+        """"
+        agent: shape: [bs, agent_length, embed_dims]
+        feats: shape: [ h*w, batch, embed_dims]
+        text: shape: [bs, cls, embed_dims]
+        """
+        return self.agent_attn(agent.permute(1, 0, 2), text.permute(1, 0, 2), feats), None
     
     def calculate_metrics(self, attn: Tensor, K: int, h: int, w: int, sigma=1.0) -> Tensor:
         """
@@ -261,7 +272,7 @@ class X_Agent(nn.Module):
         text_emb = self.proj_text(text_feat)  # [bs, cls, embed_dims]
         agent = self.get_agent(m, input[0], text_emb, h, w, K=10, Q=4, batch_first=batch_first, has_cls_token=has_cls_token)  # shape: [batch, agent_length, embed_dims]
         agent_mask = self.agent_mask(agent, output, text_emb)
-        delta_feat, _ = self.agent_attention(agent_mask, output, text_emb)  # shape: [h*w, batch, embed_dims]
+        delta_feat, _ = self.agent_attention_v2(agent_mask, output, text_emb)  # shape: [h*w, batch, embed_dims]
         output = output + delta_feat * self.agent_scale
         # distance = self.calculate_metrics(attn, int(h*w/2), h, w)  # shape: [batch, hw, hw]
         if has_cls_token:
