@@ -234,7 +234,7 @@ class X_Agent(nn.Module):
         y = y.reshape(L, N, 3, D // 3).permute(2, 1, 0, 3).reshape(3 * N, L, D // 3)    
         q, k, v = y.tensor_split(3, dim=0)  # [batch, h*w, embed_dims]
         metric_feature = k  # 采取K作为相似度衡量
-        affinity = torch.einsum('bld,bcd->blc', metric_feature, text_emb)  # [batch, h*w, cls]
+        affinity = torch.einsum('bld,bcd->blc', metric_feature, text_emb)  # [batch, h*w, cls] TODO：使用OT
         if self.use_softmax:
             affinity = F.softmax(affinity, dim=-1)
         cls_affinity = affinity.mean(dim=1)  # [batch, cls]
