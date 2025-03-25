@@ -112,7 +112,7 @@ class AGENTSeg(nn.Module):
             # i += 1
         num_layers = 12 if clip_pretrained == "ViT-B/16" else 24
         self.agent = X_Agent(
-            num_layers = num_layers,
+            num_layers = num_layers-1,  # drop last layer
             patch_size = 16 if clip_pretrained == "ViT-B/16" else 14,  # 16 for ViT-B/16 | 14 for ViT-L/14@336px
             agent_length = 100,
             embed_dims = 768 if clip_pretrained == "ViT-B/16" else 1024,  # 768 for ViT-B/16 | 1024 for ViT-L/14@336px
@@ -124,7 +124,7 @@ class AGENTSeg(nn.Module):
             num_heads = 8,  # 8 for ViT-B/16 | 16 for ViT-L/14@336px
             ot = False,
         )
-        for idx in range(num_layers-1):
+        for idx in range(num_layers-1):  # drop last layer
             all_agent_forward_func = functools.partial(  # 闭包
                 self.agent.forward_v2,
                 text_feats=[self.sem_seg_head.predictor.text_features, self.sem_seg_head.predictor.text_features_test],

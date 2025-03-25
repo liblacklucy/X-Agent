@@ -57,16 +57,16 @@ class X_Agent(nn.Module):
         # nn.init.uniform_(self.agent.data, -val, val)
         self.agent_scale = nn.Parameter(torch.tensor(self.scale_init))
         # self.metric_scale = nn.Parameter(torch.tensor(self.scale_init))
-        # self.agent_proj_1 = nn.Linear(self.embed_dims, self.embed_dims)  # TODO: for froward
-        # nn.init.kaiming_uniform_(self.agent_proj_1.weight, a=math.sqrt(5))  # TODO: for froward
-        # self.agent_proj_2 = nn.Linear(self.embed_dims, self.embed_dims)  # TODO: for froward
-        # nn.init.kaiming_uniform_(self.agent_proj_2.weight, a=math.sqrt(5))  # TODO: for froward
+        # self.agent_proj_1 = nn.Linear(self.embed_dims, self.embed_dims)  # TODO: for agent_attention
+        # nn.init.kaiming_uniform_(self.agent_proj_1.weight, a=math.sqrt(5))  # TODO: for agent_attention
+        # self.agent_proj_2 = nn.Linear(self.embed_dims, self.embed_dims)  # TODO: for agent_attention
+        # nn.init.kaiming_uniform_(self.agent_proj_2.weight, a=math.sqrt(5))  # TODO: for agent_attention
         self.mask_pooling = AgentMaskPooling(self.embed_dims)
         self.mlp_text = nn.Sequential(
             nn.Linear(self.text_dim, self.embed_dims),
             nn.ReLU(),
         )
-        self.agent_attn = ResidualAgentAttentionBlock(self.embed_dims, self.num_heads)  # TODO：for forward_v2
+        self.agent_attn = ResidualAgentAttentionBlock(self.embed_dims, self.num_heads)  # TODO：for agent_attention_v2
         
     # def return_auto(self, feats):
     #     if self.link_token_to_query:
@@ -210,7 +210,7 @@ class X_Agent(nn.Module):
         text_feat = text_feat.expand(bs, -1, -1, -1)  # [bs, cls, P, text_dim]
         text_emb = self.proj_text(text_feat)  # [bs, cls, embed_dims]
         agent_mask = self.agent_mask(agent, output, text_emb)
-        delta_feat, _ = self.agent_attention(agent_mask, output, text_emb)  # shape: [h*w, batch, embed_dims]
+        delta_feat, _ = self.agent_attention_v2(agent_mask, output, text_emb)  # shape: [h*w, batch, embed_dims]
         output = output + delta_feat * self.agent_scale
         # distance = self.calculate_metrics(attn, int(h*w/2), h, w)  # shape: [batch, hw, hw]
         if has_cls_token:
@@ -234,14 +234,17 @@ class X_Agent(nn.Module):
         y = y.reshape(L, N, 3, D // 3).permute(2, 1, 0, 3).reshape(3 * N, L, D // 3)    
         q, k, v = y.tensor_split(3, dim=0)  # [batch, h*w, embed_dims]
         metric_feature = k  # 采取K作为相似度衡量
+        # metric_feature_normalized = F.normalize(metric_feature, p=2, dim=-1)  # shape: [batch, h*w, embed_dims]
+        # text_emb_normalized = F.normalize(text_emb, p=2, dim=-1)            # shape: [batch, cls, embed_dims]
+        # affinity = torch.einsum('bld,bcd->blc', metric_feature_normalized, text_emb_normalized)  # [batch, h*w, cls] TODO：使用OT
         affinity = torch.einsum('bld,bcd->blc', metric_feature, text_emb)  # [batch, h*w, cls] TODO：使用OT
         if self.use_softmax:
             affinity = F.softmax(affinity, dim=-1)
         cls_affinity = affinity.mean(dim=1)  # [batch, cls]
         K = min(text_emb.size(1), K)
-        _, topk_cls = torch.topk(cls_affinity, K, dim=-1, sorted=False)  # [batch, K]
+        _, topk_cls = torch.topk(cls_affinity, K, dim=-1, sorted=False, largest=False)  # [batch, K]
         selected_affinity = torch.gather(affinity, dim=-1, index=topk_cls.unsqueeze(1).expand(-1, L, K))  # [batch, hw, K]
-        _, indices = torch.topk(selected_affinity, Q, dim=1, largest=False)  # [batch, Q, K]
+        _, indices = torch.topk(selected_affinity, Q, dim=1, largest=True)  # [batch, Q, K] TODO：筛选高于阈值部分的token
         candidates = indices.reshape(N, -1)  # [batch, Q*K]
         agent = torch.gather(v, dim=1, index=candidates.unsqueeze(-1).expand(-1, -1, metric_feature.size(2)))  # [batch, Q*K, embed_dims]  由于agent中可能存在重叠位置，需要在agent计算中引入mask TODO：从q,k,v,input中选择
         mask = torch.zeros((N, K*Q), dtype=torch.bool, device=affinity.device)  # [batch, Q*K]
