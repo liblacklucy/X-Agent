@@ -43,6 +43,7 @@ class X_Agent(nn.Module):
             eps = 1e-3
             max_iter = 100
             self.sinkhornkeops = SinkhornDistance(eps=eps, max_iter=max_iter, cost=dotmat)
+        self.use_sigmoid = True
         
     def create_model(self):
         val = math.sqrt(
@@ -234,18 +235,20 @@ class X_Agent(nn.Module):
         y = y.reshape(L, N, 3, D // 3).permute(2, 1, 0, 3).reshape(3 * N, L, D // 3)    
         q, k, v = y.tensor_split(3, dim=0)  # [batch, h*w, embed_dims]
         metric_feature = k  # 采取K作为相似度衡量
-        # metric_feature_normalized = F.normalize(metric_feature, p=2, dim=-1)  # shape: [batch, h*w, embed_dims]
-        # text_emb_normalized = F.normalize(text_emb, p=2, dim=-1)            # shape: [batch, cls, embed_dims]
-        # affinity = torch.einsum('bld,bcd->blc', metric_feature_normalized, text_emb_normalized)  # [batch, h*w, cls] TODO：使用OT
-        affinity = torch.einsum('bld,bcd->blc', metric_feature, text_emb)  # [batch, h*w, cls] TODO：使用OT
-        if self.use_softmax:
-            affinity = F.softmax(affinity, dim=-1)
+        metric_feature_normalized = F.normalize(metric_feature, p=2, dim=-1)  # shape: [batch, h*w, embed_dims]
+        text_emb_normalized = F.normalize(text_emb, p=2, dim=-1)            # shape: [batch, cls, embed_dims]
+        affinity = torch.einsum('bld,bcd->blc', metric_feature_normalized, text_emb_normalized)  # [batch, h*w, cls] TODO：使用OT
+        # affinity = torch.einsum('bld,bcd->blc', metric_feature, text_emb)  # [batch, h*w, cls] TODO：使用OT
+        # if self.use_softmax:
+        #     affinity = F.softmax(affinity, dim=-1)
+        if self.use_sigmoid:
+            affinity = torch.sigmoid(affinity)
         cls_affinity = affinity.mean(dim=1)  # [batch, cls]
         K = min(text_emb.size(1), K)
-        _, topk_cls = torch.topk(cls_affinity, K, dim=-1, sorted=False, largest=False)  # [batch, K]
+        _, topk_cls = torch.topk(cls_affinity, K, dim=-1, sorted=False, largest=True)  # [batch, K]
         selected_affinity = torch.gather(affinity, dim=-1, index=topk_cls.unsqueeze(1).expand(-1, L, K))  # [batch, hw, K]
         _, indices = torch.topk(selected_affinity, Q, dim=1, largest=True)  # [batch, Q, K] TODO：筛选高于阈值部分的token
-        candidates = indices.reshape(N, -1)  # [batch, Q*K]
+        candidates = indices.reshape(N, -1)  # [batch, Q*K] TODO：该索引是相对索引还是全局索引？
         agent = torch.gather(v, dim=1, index=candidates.unsqueeze(-1).expand(-1, -1, metric_feature.size(2)))  # [batch, Q*K, embed_dims]  由于agent中可能存在重叠位置，需要在agent计算中引入mask TODO：从q,k,v,input中选择
         mask = torch.zeros((N, K*Q), dtype=torch.bool, device=affinity.device)  # [batch, Q*K]
         for i in range(N):

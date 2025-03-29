@@ -81,38 +81,8 @@ class AGENTSeg(nn.Module):
         self.upsample1 = nn.ConvTranspose2d(self.proj_dim, 256, kernel_size=2, stride=2)
         self.upsample2 = nn.ConvTranspose2d(self.proj_dim, 128, kernel_size=4, stride=4)
         self.layer_indexes = [3, 7] if clip_pretrained == "ViT-B/16" else [7, 15] 
-        # self.agent = X_Agent(
-        #     num_layers = len(self.layer_indexes),
-        #     patch_size = 16 if clip_pretrained == "ViT-B/16" else 14,  # 16 for ViT-B/16 | 14 for ViT-L/14@336px
-        #     agent_length = 100,
-        #     embed_dims = 768 if clip_pretrained == "ViT-B/16" else 1024,  # 768 for ViT-B/16 | 1024 for ViT-L/14@336px
-        #     query_dims = 128,
-        #     use_softmax = True,
-        #     link_token_to_query = True,
-        #     scale_init = 0.001,
-        #     text_dim = 512 if clip_pretrained == "ViT-B/16" else 768,  # 512 for ViT-B/16 | 768 for ViT-L/14@336px
-        #     num_heads = 8,  # 8 for ViT-B/16 | 16 for ViT-L/14@336px
-        #     ot = False,
-        # )
-        self.layers = []
-        # i = 0
-        for l in self.layer_indexes:
-            # m：当前模块（即，resblocks[l]）; _：输入（通常不需要使用，因此用_忽略）; o：输出（即该模块的前向传播结果）
-            self.sem_seg_head.predictor.clip_model.visual.transformer.resblocks[l].register_forward_hook(lambda m, _, o: self.layers.append(o))
-            # all_agent_forward_func = functools.partial(  # 闭包
-            #     self.agent.forward_v2,
-            #     text_feats=[self.sem_seg_head.predictor.text_features, self.sem_seg_head.predictor.text_features_test],
-            #     layer=i,
-            #     h=24,
-            #     w=24,
-            #     batch_first=False,
-            #     has_cls_token=True
-            # )
-            # self.sem_seg_head.predictor.clip_model.visual.transformer.resblocks[l].register_forward_hook(all_agent_forward_func)
-            # i += 1
-        num_layers = 12 if clip_pretrained == "ViT-B/16" else 24
         self.agent = X_Agent(
-            num_layers = num_layers-1,  # drop last layer
+            num_layers = len(self.layer_indexes),
             patch_size = 16 if clip_pretrained == "ViT-B/16" else 14,  # 16 for ViT-B/16 | 14 for ViT-L/14@336px
             agent_length = 100,
             embed_dims = 768 if clip_pretrained == "ViT-B/16" else 1024,  # 768 for ViT-B/16 | 1024 for ViT-L/14@336px
@@ -124,17 +94,47 @@ class AGENTSeg(nn.Module):
             num_heads = 8,  # 8 for ViT-B/16 | 16 for ViT-L/14@336px
             ot = False,
         )
-        for idx in range(num_layers-1):  # drop last layer
+        self.layers = []
+        i = 0
+        for l in self.layer_indexes:
+            # m：当前模块（即，resblocks[l]）; _：输入（通常不需要使用，因此用_忽略）; o：输出（即该模块的前向传播结果）
+            self.sem_seg_head.predictor.clip_model.visual.transformer.resblocks[l].register_forward_hook(lambda m, _, o: self.layers.append(o))
             all_agent_forward_func = functools.partial(  # 闭包
                 self.agent.forward_v2,
                 text_feats=[self.sem_seg_head.predictor.text_features, self.sem_seg_head.predictor.text_features_test],
-                layer=idx,
+                layer=i,
                 h=24,
                 w=24,
                 batch_first=False,
                 has_cls_token=True
             )
-            self.sem_seg_head.predictor.clip_model.visual.transformer.resblocks[idx].register_forward_hook(all_agent_forward_func)
+            self.sem_seg_head.predictor.clip_model.visual.transformer.resblocks[l].register_forward_hook(all_agent_forward_func)
+            i += 1
+        # num_layers = 12 if clip_pretrained == "ViT-B/16" else 24
+        # self.agent = X_Agent(
+        #     num_layers = num_layers-1,  # drop last layer
+        #     patch_size = 16 if clip_pretrained == "ViT-B/16" else 14,  # 16 for ViT-B/16 | 14 for ViT-L/14@336px
+        #     agent_length = 100,
+        #     embed_dims = 768 if clip_pretrained == "ViT-B/16" else 1024,  # 768 for ViT-B/16 | 1024 for ViT-L/14@336px
+        #     query_dims = 128,
+        #     use_softmax = True,
+        #     link_token_to_query = True,
+        #     scale_init = 0.001,
+        #     text_dim = 512 if clip_pretrained == "ViT-B/16" else 768,  # 512 for ViT-B/16 | 768 for ViT-L/14@336px
+        #     num_heads = 8,  # 8 for ViT-B/16 | 16 for ViT-L/14@336px
+        #     ot = False,
+        # )
+        # for idx in range(num_layers-1):  # drop last layer
+        #     all_agent_forward_func = functools.partial(  # 闭包
+        #         self.agent.forward_v2,
+        #         text_feats=[self.sem_seg_head.predictor.text_features, self.sem_seg_head.predictor.text_features_test],
+        #         layer=idx,
+        #         h=24,
+        #         w=24,
+        #         batch_first=False,
+        #         has_cls_token=True
+        #     )
+        #     self.sem_seg_head.predictor.clip_model.visual.transformer.resblocks[idx].register_forward_hook(all_agent_forward_func)
         log_requires_grad(self)
 
     @classmethod

@@ -13,11 +13,14 @@ def log_requires_grad(model: nn.Module):
     requires_grad_names = []
     num_params = 0
     num_trainable = 0
+    num_trainable_exclude_clip = 0
     for name, param in model.named_parameters():
         num_params += param.numel()
         if param.requires_grad == True:
             requires_grad_names.append(name)
             num_trainable += param.numel()
+            if "transformer" not in name:
+                num_trainable_exclude_clip += param.numel()
     global first_set_requires_grad
     if first_set_requires_grad:
         logger = logging.getLogger("detectron2.trainer")
@@ -25,6 +28,9 @@ def log_requires_grad(model: nn.Module):
             logger.info(f"set_requires_grad----{name}")
         logger.info(
             f"Total trainable params--{num_trainable}, All params--{num_params}, Ratio--{num_trainable*100/num_params:.1f}%"
+        )
+        logger.info(
+            f"Total trainable params exclude clip--{num_trainable_exclude_clip}, All params--{num_params}, Ratio--{num_trainable_exclude_clip*100/num_params:.1f}%"
         )
         first_set_requires_grad = False
 
