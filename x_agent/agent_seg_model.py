@@ -249,4 +249,8 @@ class AGENTSeg(nn.Module):
         height = batched_inputs[0].get("height", out_res[0])
         width = batched_inputs[0].get("width", out_res[1])
         output = sem_seg_postprocess(outputs[0], out_res, height, width)
+        if getattr(self, "__VISUALIZATION__", False):
+            setattr(self, "__data__", dict(
+                logits=output,
+            ))
         return [{'sem_seg': output}]

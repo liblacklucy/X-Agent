@@ -10,3 +10,4 @@ docs/
 prepare.sh
 train.sh
 test.sh
+demo.sh

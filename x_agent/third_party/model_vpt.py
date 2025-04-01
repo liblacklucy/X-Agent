@@ -198,7 +198,8 @@ class ResidualAttentionBlock(nn.Module):
 
     def attention(self, x: torch.Tensor):
         self.attn_mask = self.attn_mask.to(dtype=x.dtype, device=x.device) if self.attn_mask is not None else None
-        return self.attn(x, x, x, need_weights=False, attn_mask=self.attn_mask)[0]
+        # return self.attn(x, x, x, need_weights=False, attn_mask=self.attn_mask)[0]
+        return self.attn(x, x, x, need_weights=True, average_attn_weights=False, attn_mask=self.attn_mask)[0]  # for MAD
 
     def forward(self, x: torch.Tensor, prompt=None):  # 3
         x = x + self.attention(self.ln_1(x))

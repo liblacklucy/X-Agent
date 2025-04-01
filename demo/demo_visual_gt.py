@@ -23,7 +23,8 @@ from detectron2.data.detection_utils import read_image
 from detectron2.projects.deeplab import add_deeplab_config
 from detectron2.utils.logger import setup_logger
 
-from mask_former import add_mask_former_config
+# from mask_former import add_mask_former_config
+from x_agent import add_cat_seg_config
 # from predictor import VisualizationDemo
 from visualizer import VisualizationGt
 from PIL import Image
@@ -36,7 +37,8 @@ def setup_cfg(args):
     # load config from file and command-line arguments
     cfg = get_cfg()
     add_deeplab_config(cfg)
-    add_mask_former_config(cfg)
+    # add_mask_former_config(cfg)
+    add_cat_seg_config(cfg)
     cfg.merge_from_file(args.config_file)
     cfg.merge_from_list(args.opts)
     cfg.freeze()
@@ -129,6 +131,8 @@ if __name__ == "__main__":
             start_time = time.time()
             predictions = {}
             gt_file = os.path.join(gt_path, os.path.splitext(os.path.basename(path))[0] + '.png')
+            if not os.path.isfile(gt_file):
+                continue
             # import pdb; pdb.set_trace()
             predictions['sem_seg'] = np.asarray(Image.open(gt_file))
             predictions, visualized_output = demo.run_on_image(img, predictions)
