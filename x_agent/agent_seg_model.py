@@ -92,7 +92,7 @@ class AGENTSeg(nn.Module):
             scale_init = 0.001,
             text_dim = 512 if clip_pretrained == "ViT-B/16" else 768,  # 512 for ViT-B/16 | 768 for ViT-L/14@336px
             num_heads = 8,  # 8 for ViT-B/16 | 16 for ViT-L/14@336px
-            ot = False,
+            ot = True,
         )
         self.layers = []
         i = 0

@@ -46,12 +46,12 @@ class X_Agent(nn.Module):
         self.use_sigmoid = True
         
     def create_model(self):
-        val = math.sqrt(
-            6.0
-            / float(
-                3 * reduce(mul, (self.patch_size, self.patch_size), 1) + self.embed_dims
-            )
-        )
+        # val = math.sqrt(
+        #     6.0
+        #     / float(
+        #         3 * reduce(mul, (self.patch_size, self.patch_size), 1) + self.embed_dims
+        #     )
+        # )
         # self.transform = nn.Linear(self.embed_dims, self.query_dims)
         # self.merge = nn.Linear(self.query_dims * 3, self.query_dims)
         # self.agent = nn.Parameter(torch.empty([self.num_layers, self.agent_length, self.embed_dims]))  # TODO: for froward
@@ -63,12 +63,16 @@ class X_Agent(nn.Module):
         # self.agent_proj_2 = nn.Linear(self.embed_dims, self.embed_dims)  # TODO: for agent_attention
         # nn.init.kaiming_uniform_(self.agent_proj_2.weight, a=math.sqrt(5))  # TODO: for agent_attention
         self.mask_pooling = AgentMaskPooling(self.embed_dims)
+        self.gamma1 = nn.Parameter(torch.zeros(1, dtype=torch.float32).normal_(mean=0,std=0.1))
+        self.gamma2 = nn.Parameter(torch.zeros(1, dtype=torch.float32).normal_(mean=0,std=0.1))
+        self.gamma_init = 0.1
         self.mlp_text = nn.Sequential(
             nn.Linear(self.text_dim, self.embed_dims),
             nn.ReLU(),
         )
-        self.agent_attn = ResidualAgentAttentionBlock(self.embed_dims, self.num_heads)  # TODO：for agent_attention_v2
-        
+        # self.agent_attn = ResidualAgentAttentionBlock(self.embed_dims, self.num_heads)  # TODO：for agent_attention_v2
+        self.agent_attn = ResidualAgentAttentionWithDiffBlock(self.embed_dims, int(self.num_heads//2))  # TODO：for agent_attention_v2
+
     # def return_auto(self, feats):
     #     if self.link_token_to_query:
     #         tokens = self.transform(self.get_tokens(-1)).permute(1, 2, 0)  # [agent_length, query_dims, num_layers]
@@ -92,7 +96,7 @@ class X_Agent(nn.Module):
         else:
             return self.agent[layer]
     
-    def proj_text(self, text_feats: Tensor):  # TODO:print(text_feats.shape)
+    def proj_text(self, text_feats: Tensor):
         text_feats = text_feats.mean(dim=-2)  # [b, cls, text_dim]
         text_feats = text_feats / text_feats.norm(dim=-1, keepdim=True)
         text_emb = self.mlp_text(text_feats)  # [b, cls, embed_dims]
@@ -112,7 +116,10 @@ class X_Agent(nn.Module):
         # mask visual
         masked_vis = torch.einsum('bnd,bad->bna', feats.permute(1, 0, 2), agent) * scale  # [bs, hw, agent_length]
         masked_vis = self.mask_pooling(feats.permute(1, 0, 2), masked_vis)  # [bs, agent_length, embed_dims]
-        agent = agent + masked_text + masked_vis
+        gamma_1 = torch.exp(self.gamma1).type_as(agent)
+        gamma_2 = torch.exp(self.gamma2).type_as(agent)
+        gamma = gamma_1 - gamma_2 + self.gamma_init
+        agent = agent + gamma * masked_text + masked_vis
         return agent
 
     def agent_attention(self, agent: Tensor, feats: Tensor, text: Tensor, scale: float=None) -> Tensor:
@@ -221,7 +228,7 @@ class X_Agent(nn.Module):
         return output
     
     @torch.no_grad()
-    def get_agent(self, m: nn.Module, input: Tensor, text_emb: Tensor, h: float, w: float, K: int=10, Q: int=4, batch_first=False, has_cls_token=True) -> Tensor:
+    def agent_selection(self, m: nn.Module, input: Tensor, text_emb: Tensor, h: float, w: float, K: int=10, Q: int=4, batch_first=False, has_cls_token=True) -> Tensor:
         if batch_first:
             input = input.permute(1, 0, 2)  # shape: [1+h*w, batch, embed_dims]
         if has_cls_token:
@@ -238,7 +245,9 @@ class X_Agent(nn.Module):
         metric_feature_normalized = F.normalize(metric_feature, p=2, dim=-1)  # shape: [batch, h*w, embed_dims]
         text_emb_normalized = F.normalize(text_emb, p=2, dim=-1)            # shape: [batch, cls, embed_dims]
         affinity = torch.einsum('bld,bcd->blc', metric_feature_normalized, text_emb_normalized)  # [batch, h*w, cls] TODO：使用OT
-        # affinity = torch.einsum('bld,bcd->blc', metric_feature, text_emb)  # [batch, h*w, cls] TODO：使用OT
+        if self.sinkhornkeops is not None and m.training:
+            affinity_plan, _, _, _ = self.sinkhornkeops(metric_feature_normalized, text_emb_normalized)  # shape: [batch, h*w, embed_dims]和[bs, cls, embed_dims] -> [batch, h*w, cls]
+            affinity = affinity * affinity_plan
         # if self.use_softmax:
         #     affinity = F.softmax(affinity, dim=-1)
         if self.use_sigmoid:
@@ -276,7 +285,7 @@ class X_Agent(nn.Module):
         _, bs, _ = output.shape
         text_feat = text_feat.expand(bs, -1, -1, -1)  # [bs, cls, P, text_dim]
         text_emb = self.proj_text(text_feat)  # [bs, cls, embed_dims]
-        agent = self.get_agent(m, input[0], text_emb, h, w, K=10, Q=4, batch_first=batch_first, has_cls_token=has_cls_token)  # shape: [batch, agent_length, embed_dims]
+        agent = self.agent_selection(m, input[0], text_emb, h, w, K=10, Q=4, batch_first=batch_first, has_cls_token=has_cls_token)  # shape: [batch, agent_length, embed_dims]
         agent_mask = self.agent_mask(agent, output, text_emb)
         delta_feat, _ = self.agent_attention_v2(agent_mask, output, text_emb)  # shape: [h*w, batch, embed_dims]
         output = output + delta_feat * self.agent_scale
