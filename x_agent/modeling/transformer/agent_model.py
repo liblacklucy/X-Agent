@@ -691,6 +691,8 @@ class Aggregator(nn.Module):
             out.scatter_(dim=1, index=classes[..., None, None].expand(-1, -1, logit.size(-2), logit.size(-1)), src=logit)
             logit = out
         return logit
+    
+    
 # class Aggregator(nn.Module):
 #     """引入X-Agent"""
 #     def __init__(self, 
