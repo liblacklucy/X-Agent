@@ -258,6 +258,10 @@ class X_Agent(nn.Module):
         selected_affinity = torch.gather(affinity, dim=-1, index=topk_cls.unsqueeze(1).expand(-1, L, K))  # [batch, hw, K]
         _, indices = torch.topk(selected_affinity, Q, dim=1, largest=True)  # [batch, Q, K] TODO：筛选高于阈值部分的token
         candidates = indices.reshape(N, -1)  # [batch, Q*K] TODO：该索引是相对索引还是全局索引？
+        if getattr(self, "__VISUALIZATION__", False):
+            setattr(self, "__data__", dict(
+                candidates=candidates,
+            ))
         agent = torch.gather(v, dim=1, index=candidates.unsqueeze(-1).expand(-1, -1, metric_feature.size(2)))  # [batch, Q*K, embed_dims]  由于agent中可能存在重叠位置，需要在agent计算中引入mask TODO：从q,k,v,input中选择
         mask = torch.zeros((N, K*Q), dtype=torch.bool, device=affinity.device)  # [batch, Q*K]
         for i in range(N):
@@ -285,7 +289,7 @@ class X_Agent(nn.Module):
         _, bs, _ = output.shape
         text_feat = text_feat.expand(bs, -1, -1, -1)  # [bs, cls, P, text_dim]
         text_emb = self.proj_text(text_feat)  # [bs, cls, embed_dims]
-        agent = self.agent_selection(m, input[0], text_emb, h, w, K=10, Q=4, batch_first=batch_first, has_cls_token=has_cls_token)  # shape: [batch, agent_length, embed_dims]
+        agent = self.agent_selection(m, input[0], text_emb, h, w, K=5, Q=80, batch_first=batch_first, has_cls_token=has_cls_token)  # shape: [batch, agent_length, embed_dims]
         agent_mask = self.agent_mask(agent, output, text_emb)
         delta_feat, _ = self.agent_attention_v2(agent_mask, output, text_emb)  # shape: [h*w, batch, embed_dims]
         output = output + delta_feat * self.agent_scale

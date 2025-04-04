@@ -188,6 +188,10 @@ class AGENTSeg(nn.Module):
         clip_images = ImageList.from_tensors(clip_images, self.size_divisibility)
         self.layers = []
         clip_images_resized = F.interpolate(clip_images.tensor, size=self.clip_resolution, mode='bilinear', align_corners=False, )
+        # if getattr(self, "__VISUALIZATION__", False):
+        #     setattr(self, "__image__", dict(
+        #         clip_images_resized=clip_images_resized,
+        #     ))
         clip_features = self.sem_seg_head.predictor.clip_model.encode_image(clip_images_resized, dense=True)
         image_features = clip_features[:, 1:, :]  # w/o [CLS] TOKEN
         # CLIP ViT features for guidance

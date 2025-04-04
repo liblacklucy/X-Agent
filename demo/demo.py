@@ -18,6 +18,8 @@ import cv2
 import numpy as np
 import tqdm
 import torch
+import torch.nn.functional as F
+from PIL import Image, ImageDraw
 
 from detectron2.config import get_cfg
 from detectron2.data.detection_utils import read_image
@@ -177,6 +179,49 @@ def get_attention_hook(layer_idx):
 #     module.forward = new_forward
 
 
+def mask_image_with_patches(image, index_list, save_path=None):
+    # 1. 图像预处理
+    img_pil = Image.fromarray(image)
+    img = img_pil.convert("RGBA")
+    # img = Image.open(image_path).convert('RGBA')  # 保留透明度通道
+    original_size = img.size
+    # 转换为PyTorch Tensor并缩放
+    img = cv2.cvtColor(np.array(img), cv2.COLOR_BGR2RGB)
+    img_tensor = torch.from_numpy(img).float() / 255.0
+    img_tensor = img_tensor.permute(2, 0, 1).unsqueeze(0)  # (B, C, H, W)
+    resized = F.interpolate(img_tensor, size=(384, 384), mode='bilinear', align_corners=False)
+    resized = resized.squeeze(0).permute(1, 2, 0).numpy()  # 转回HWC格式 (384, 384, 4)
+    # 2. 创建带透明度的灰色掩码层
+    mask_layer = Image.new('RGBA', (384, 384), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(mask_layer)
+    gray_color = (128, 128, 128, 200)  # 半透明灰色 (RGBα)
+    # 3. 绘制掩码区域
+    patch_size = 16
+    grid_size = 384 // patch_size
+    for idx in index_list:
+        if idx < 0 or idx >= grid_size**2:
+            continue  # 跳过无效索引
+        # 计算patch位置
+        row = idx // grid_size
+        col = idx % grid_size
+        x0 = col * patch_size
+        y0 = row * patch_size
+        x1 = x0 + patch_size
+        y1 = y0 + patch_size
+        # 绘制半透明矩形
+        draw.rectangle([x0, y0, x1, y1], fill=gray_color)
+    # 4. 合成掩码图像
+    resized_pil = Image.fromarray((resized * 255).astype(np.uint8)).convert('RGBA')
+    final_image = Image.alpha_composite(resized_pil, mask_layer)
+    # 5. 恢复原始尺寸 (可选)
+#     if original_size != (384, 384):
+#         final_image = final_image.resize(original_size, Image.LANCZOS)
+    # 保存或返回结果
+    if save_path:
+        final_image.save(save_path)
+    return final_image
+
+
 if __name__ == "__main__":
     mp.set_start_method("spawn", force=True)
     args = get_parser().parse_args()
@@ -192,9 +237,10 @@ if __name__ == "__main__":
     # for layer in demo.predictor.model.sem_seg_head.predictor.clip_model.visual.transformer.resblocks:
     #     patch_attention(layer.attn)
 
-    for layer_idx, layer in enumerate(demo.predictor.model.sem_seg_head.predictor.clip_model.visual.transformer.resblocks):
-        layer.attn.register_forward_hook(get_attention_hook(layer_idx))
+    # for layer_idx, layer in enumerate(demo.predictor.model.sem_seg_head.predictor.clip_model.visual.transformer.resblocks):
+    #     layer.attn.register_forward_hook(get_attention_hook(layer_idx))
     setattr(demo.predictor.model, "__VISUALIZATION__", True)
+    setattr(demo.predictor.model.agent, "__VISUALIZATION__", True)
 
     idx = 0
     if args.input:
@@ -265,24 +311,30 @@ if __name__ == "__main__":
             # vis = Image.new("RGB", [img_pil.width, img_pil.height])
             # vis.paste(blended_pil, (0, 0))
 
-            # if args.output:
-            #     if os.path.isdir(args.output):
-            #         assert os.path.isdir(args.output), args.output
-            #         out_filename = os.path.join(args.output, os.path.basename(path))
-            #     else:
-            #         assert len(args.input) == 1, "Please specify a directory with args.output"
-            #         out_filename = args.output
-            #     # visualized_output.save(out_filename)
-            #     vis.save(out_filename)
-            # else:
-            #     cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
-            #     cv2.imshow(WINDOW_NAME, visualized_output.get_image()[:, :, ::-1])
-            #     if cv2.waitKey(0) == 27:
-            #         break  # esc to quit
-            
+            # 可视化agent tokens
+            candidates = getattr(demo.predictor.model.agent, "__data__")['candidates']  # [batch, Q*K]
+            print(candidates[0].cpu().numpy().tolist())
+            tokens = mask_image_with_patches(img, candidates[0].cpu().numpy().tolist(), save_path=None)
+
+            if args.output:
+                if os.path.isdir(args.output):
+                    assert os.path.isdir(args.output), args.output
+                    out_filename = os.path.join(args.output, os.path.basename(path))
+                else:
+                    assert len(args.input) == 1, "Please specify a directory with args.output"
+                    out_filename = args.output
+                # visualized_output.save(out_filename)
+                # vis.save(out_filename)
+                tokens.save(out_filename.replace("jpg", "png"))
+            else:
+                cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
+                cv2.imshow(WINDOW_NAME, visualized_output.get_image()[:, :, ::-1])
+                if cv2.waitKey(0) == 27:
+                    break  # esc to quit
+
             # exit(4)
             idx += 1
-            if idx > 1:
+            if idx > 100:
                 break
     elif args.webcam:
         assert args.input is None, "Cannot have both --input and --webcam!"
@@ -338,7 +390,7 @@ if __name__ == "__main__":
         else:
             cv2.destroyAllWindows()
 
-    for layer_idx, attn in attention_results.items():
-        # print(layer_idx, attn.shape)
-        mad = compute_mean_attention_dist(patch_size=16, attention_weights=attn.numpy())
-        print(layer_idx, "mean attention distance", mad)
+    # for layer_idx, attn in attention_results.items():
+    #     # print(layer_idx, attn.shape)
+    #     mad = compute_mean_attention_dist(patch_size=16, attention_weights=attn.numpy())
+    #     print(layer_idx, "mean attention distance", mad)
