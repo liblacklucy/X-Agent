@@ -227,7 +227,7 @@ if __name__ == "__main__":
     args = get_parser().parse_args()
     setup_logger(name="fvcore")
     logger = setup_logger()
-    logger.info("Arguments: " + str(args))
+    # logger.info("Arguments: " + str(args))
 
     cfg = setup_cfg(args)
 
@@ -262,39 +262,48 @@ if __name__ == "__main__":
                 )
             )
 
+            # 可视化agent tokens
+            h, w = img.shape[:2]
+            candidates = getattr(demo.predictor.model.agent, "__data__")['candidates']  # [batch, Q*K]
+            topk_cls = getattr(demo.predictor.model.agent, "__data__")['topk_cls']
+            indices = getattr(demo.predictor.model.agent, "__data__")['indices']
+            tokens = mask_image_with_patches(img, candidates[0].cpu().numpy().tolist(), save_path=None)
+            logits = getattr(demo.predictor.model.agent, "__data__")['affinity']  # [cls, h, w]
+            logits = F.interpolate(logits[None,], size=(h, w), mode='bilinear', align_corners=False)[0]
+
             # 热力图可视化
             # logits = getattr(demo.predictor.model, "__data__")['logits']  # [cls, h, w]
-            # # print(logits.shape)
-            # # print(logits)
-            # # exit(4)
-            # eps = 1e-4
-            # tau = 0.0
-            # alpha = 0.5
-            # logits[logits < tau] = eps
-            # img_pil = Image.fromarray(img)
-            # img_rgba = img_pil.convert("RGBA")
-            # img_np = np.array(img_rgba).astype(float)
+            # print(logits.shape)
+            # print(logits)
+            # exit(4)
+            eps = 1e-4
+            tau = 0.0
+            alpha = 0.5
+            logits[logits < tau] = eps
+            img_pil = Image.fromarray(img)
+            img_rgba = img_pil.convert("RGBA")
+            img_np = np.array(img_rgba).astype(float)
             # for all classes
-            # blended_pil_all = []
-            # for cls_idx in range(20):
-            #     heatmap = logits[cls_idx].cpu().numpy()
-            #     heatmap = (heatmap - heatmap.min()) / (heatmap.max() - heatmap.min())
-            #     heatmap = np.uint8(255 * heatmap)
-            #     heatmap = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
-            #     heatmap = cv2.cvtColor(heatmap, cv2.COLOR_BGR2RGB)      # BGR转RGB
-            #     heatmap_pil = Image.fromarray(heatmap)
-            #     heatmap_rgba = heatmap_pil.convert("RGBA")
-            #     heatmap_np = np.array(heatmap_rgba).astype(float)
-            #     blended_np = (1 - alpha) * img_np[:, :, :3] + alpha * heatmap_np[:, :, :3]
-            #     blended_np = np.clip(blended_np, 0, 255).astype(np.uint8)
-            #     blended_pil = Image.fromarray(blended_np)
-            #     blended_pil_all.append(blended_pil)
-            # vis = Image.new("RGB", [img_pil.width * 4, img_pil.height * 5])
-            # # vis.paste(img_pil, (0, 0))
-            # # vis.paste(visualized_output, (img_pil.width, 0))
-            # for i in range(4):
-            #     for j in range(5):
-            #         vis.paste(blended_pil_all[i*4+j], (img_pil.width * int(i), img_pil.height * int(j)))
+            blended_pil_all = []
+            for cls_idx in range(20):
+                heatmap = logits[cls_idx].cpu().numpy()
+                heatmap = (heatmap - heatmap.min()) / (heatmap.max() - heatmap.min())
+                heatmap = np.uint8(255 * heatmap)
+                heatmap = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
+                heatmap = cv2.cvtColor(heatmap, cv2.COLOR_BGR2RGB)      # BGR转RGB
+                heatmap_pil = Image.fromarray(heatmap)
+                heatmap_rgba = heatmap_pil.convert("RGBA")
+                heatmap_np = np.array(heatmap_rgba).astype(float)
+                blended_np = (1 - alpha) * img_np[:, :, :3] + alpha * heatmap_np[:, :, :3]
+                blended_np = np.clip(blended_np, 0, 255).astype(np.uint8)
+                blended_pil = Image.fromarray(blended_np)
+                blended_pil_all.append(blended_pil)
+            vis = Image.new("RGB", [img_pil.width * 4, img_pil.height * 5])
+            # vis.paste(img_pil, (0, 0))
+            # vis.paste(visualized_output, (img_pil.width, 0))
+            for i in range(4):
+                for j in range(5):
+                    vis.paste(blended_pil_all[i*4+j], (img_pil.width * int(i), img_pil.height * int(j)))
             # for one class
             # cls_idx = 15
             # heatmap = logits[cls_idx].cpu().numpy()
@@ -311,11 +320,6 @@ if __name__ == "__main__":
             # vis = Image.new("RGB", [img_pil.width, img_pil.height])
             # vis.paste(blended_pil, (0, 0))
 
-            # 可视化agent tokens
-            candidates = getattr(demo.predictor.model.agent, "__data__")['candidates']  # [batch, Q*K]
-            print(candidates[0].cpu().numpy().tolist())
-            tokens = mask_image_with_patches(img, candidates[0].cpu().numpy().tolist(), save_path=None)
-
             if args.output:
                 if os.path.isdir(args.output):
                     assert os.path.isdir(args.output), args.output
@@ -324,7 +328,7 @@ if __name__ == "__main__":
                     assert len(args.input) == 1, "Please specify a directory with args.output"
                     out_filename = args.output
                 # visualized_output.save(out_filename)
-                # vis.save(out_filename)
+                vis.save(out_filename)
                 tokens.save(out_filename.replace("jpg", "png"))
             else:
                 cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)

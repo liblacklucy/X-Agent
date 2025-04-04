@@ -43,7 +43,7 @@ class X_Agent(nn.Module):
             eps = 1e-3
             max_iter = 100
             self.sinkhornkeops = SinkhornDistance(eps=eps, max_iter=max_iter, cost=dotmat)
-        self.use_sigmoid = True
+        self.use_sigmoid = False
         
     def create_model(self):
         # val = math.sqrt(
@@ -254,13 +254,17 @@ class X_Agent(nn.Module):
             affinity = torch.sigmoid(affinity)
         cls_affinity = affinity.mean(dim=1)  # [batch, cls]
         K = min(text_emb.size(1), K)
-        _, topk_cls = torch.topk(cls_affinity, K, dim=-1, sorted=False, largest=True)  # [batch, K]
+        _, topk_cls = torch.topk(cls_affinity, K, dim=-1, largest=True)  # [batch, K]
         selected_affinity = torch.gather(affinity, dim=-1, index=topk_cls.unsqueeze(1).expand(-1, L, K))  # [batch, hw, K]
         _, indices = torch.topk(selected_affinity, Q, dim=1, largest=True)  # [batch, Q, K] TODO：筛选高于阈值部分的token
         candidates = indices.reshape(N, -1)  # [batch, Q*K] TODO：该索引是相对索引还是全局索引？
         if getattr(self, "__VISUALIZATION__", False):
             setattr(self, "__data__", dict(
-                candidates=candidates,
+                candidates = candidates,
+                affinity = affinity[0].permute(1, 0).reshape(-1, h, w),  # [cls, h, w]
+                # affinity = affinity,  # [cls, h, w]
+                topk_cls = topk_cls,
+                indices = indices,
             ))
         agent = torch.gather(v, dim=1, index=candidates.unsqueeze(-1).expand(-1, -1, metric_feature.size(2)))  # [batch, Q*K, embed_dims]  由于agent中可能存在重叠位置，需要在agent计算中引入mask TODO：从q,k,v,input中选择
         mask = torch.zeros((N, K*Q), dtype=torch.bool, device=affinity.device)  # [batch, Q*K]
