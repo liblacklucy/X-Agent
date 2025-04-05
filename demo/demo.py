@@ -338,7 +338,7 @@ if __name__ == "__main__":
 
             # exit(4)
             idx += 1
-            if idx > 100:
+            if idx > 1000:
                 break
     elif args.webcam:
         assert args.input is None, "Cannot have both --input and --webcam!"

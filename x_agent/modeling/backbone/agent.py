@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.distributed as dist
 import numpy as np
 import math
 from functools import reduce
@@ -8,6 +9,74 @@ from operator import mul
 from torch import Tensor
 
 from .utils import *
+
+
+class DualProjectionModel(nn.Module):
+    def __init__(self, input_dim=512, output_dim=768):
+        super().__init__()
+        # 可学习温度参数
+        self.log_temperature = nn.Parameter(torch.tensor(0.0))
+        
+        # 线性投影分支
+        self.linear_proj = nn.Sequential(
+            nn.Linear(input_dim, output_dim),
+            nn.Dropout(0.2)
+        )
+        
+        # Transformer分支
+        self.transformer_proj = nn.Sequential(
+            nn.Linear(input_dim, output_dim),
+            nn.LayerNorm(output_dim),
+            # nn.Unflatten(-1, (1, output_dim)),  # 形状→(20,1,512)
+            nn.TransformerEncoder(
+                encoder_layer=nn.TransformerEncoderLayer(
+                    d_model=output_dim,
+                    nhead=8,
+                    dim_feedforward=2048,
+                    batch_first=True,
+                    activation='gelu'
+                ),
+                num_layers=1
+            ),
+            # nn.Flatten(),
+            # nn.Dropout(0.2)
+        )
+    
+    def load_weights(self, pretrained="/home/ljh/SemanticSegmentation/X-Agent/x_agent/modeling/backbone/final_model.pth"):
+        if isinstance(pretrained, str):
+            checkpoint = torch.jit.load(pretrained, map_location='cpu').float().state_dict()
+            state_dict = {}
+            for k in checkpoint.keys():
+                state_dict[k] = checkpoint[k]
+            u, w = self.load_state_dict(state_dict, False)
+            print(u, w, 'are misaligned params in text encoder')
+
+    def forward(self, x):
+        # 特征归一化
+        A = F.normalize(self.linear_proj(x), dim=-1)
+        B = F.normalize(self.transformer_proj(x), dim=-1)
+        return A, B
+    
+    def compute_loss(self, A, B):
+        temperature = torch.exp(self.log_temperature)
+        logits = torch.einsum('bld,bnd->bln', A, B) * temperature
+        labels = torch.eye(A.size(1), device=A.device)
+        labels = labels[None].expand(A.size(0), -1, -1)
+        loss = (F.cross_entropy(logits, labels) + 
+                F.cross_entropy(logits.permute(0, 2, 1), labels)) / 2
+        return loss
+
+
+def load_model_on_all_gpus(model, state_dict):
+    """确保所有GPU进程加载相同权重"""
+    # 主进程加载并广播
+    if dist.get_rank() == 0:
+        model.load_state_dict(state_dict, strict=False)
+    # 同步所有进程
+    dist.barrier()
+    # 广播参数
+    for param in model.parameters():
+        dist.broadcast(param.data, src=0)
 
 
 class X_Agent(nn.Module):
@@ -44,6 +113,7 @@ class X_Agent(nn.Module):
             max_iter = 100
             self.sinkhornkeops = SinkhornDistance(eps=eps, max_iter=max_iter, cost=dotmat)
         self.use_sigmoid = False
+        # self.apply(self.init_weights)
         
     def create_model(self):
         # val = math.sqrt(
@@ -66,10 +136,16 @@ class X_Agent(nn.Module):
         self.gamma1 = nn.Parameter(torch.zeros(1, dtype=torch.float32).normal_(mean=0,std=0.1))
         self.gamma2 = nn.Parameter(torch.zeros(1, dtype=torch.float32).normal_(mean=0,std=0.1))
         self.gamma_init = 0.1
-        self.mlp_text = nn.Sequential(
-            nn.Linear(self.text_dim, self.embed_dims),
-            nn.ReLU(),
-        )
+        # self.mlp_text = nn.Sequential(
+        #     nn.Linear(self.text_dim, self.embed_dims),
+        #     nn.ReLU(),
+        # )
+        self.mlp_text = DualProjectionModel()
+        self.mlp_text.apply(self.mlp_text.load_weights)
+        # checkpoint = torch.load("/home/ljh/SemanticSegmentation/X-Agent/x_agent/modeling/backbone/final_model.pth")
+        # self.mlp_text.load_state_dict(checkpoint['model_state_dict'])
+        # self.mlp_text.eval()
+        self.mlp_text.requires_grad_(False)
         # self.agent_attn = ResidualAgentAttentionBlock(self.embed_dims, self.num_heads)  # TODO：for agent_attention_v2
         self.agent_attn = ResidualAgentAttentionWithDiffBlock(self.embed_dims, int(self.num_heads//2))  # TODO：for agent_attention_v2
 
@@ -98,8 +174,10 @@ class X_Agent(nn.Module):
     
     def proj_text(self, text_feats: Tensor):
         text_feats = text_feats.mean(dim=-2)  # [b, cls, text_dim]
-        text_feats = text_feats / text_feats.norm(dim=-1, keepdim=True)
-        text_emb = self.mlp_text(text_feats)  # [b, cls, embed_dims]
+        # text_feats = text_feats / text_feats.norm(dim=-1, keepdim=True)
+        # text_emb = self.mlp_text(text_feats)  # [b, cls, embed_dims]
+        # print(text_feats.shape)
+        text_emb = self.mlp_text.transformer_proj(text_feats)  # [b, cls, embed_dims]
         return text_emb
 
     def agent_mask(self, agent: Tensor, feats: Tensor, text: Tensor, scale: float=None) -> Tensor:
@@ -256,7 +334,7 @@ class X_Agent(nn.Module):
         K = min(text_emb.size(1), K)
         _, topk_cls = torch.topk(cls_affinity, K, dim=-1, largest=True)  # [batch, K]
         selected_affinity = torch.gather(affinity, dim=-1, index=topk_cls.unsqueeze(1).expand(-1, L, K))  # [batch, hw, K]
-        _, indices = torch.topk(selected_affinity, Q, dim=1, largest=True)  # [batch, Q, K] TODO：筛选高于阈值部分的token
+        _, indices = torch.topk(selected_affinity, Q, dim=1, largest=False)  # [batch, Q, K] TODO：筛选高于阈值部分的token
         candidates = indices.reshape(N, -1)  # [batch, Q*K] TODO：该索引是相对索引还是全局索引？
         if getattr(self, "__VISUALIZATION__", False):
             setattr(self, "__data__", dict(
