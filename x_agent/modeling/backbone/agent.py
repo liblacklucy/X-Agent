@@ -14,20 +14,14 @@ from .utils import *
 class DualProjectionModel(nn.Module):
     def __init__(self, input_dim=512, output_dim=768):
         super().__init__()
-        # 可学习温度参数
         self.log_temperature = nn.Parameter(torch.tensor(0.0))
-        
-        # 线性投影分支
         self.linear_proj = nn.Sequential(
             nn.Linear(input_dim, output_dim),
             nn.Dropout(0.2)
         )
-        
-        # Transformer分支
         self.transformer_proj = nn.Sequential(
             nn.Linear(input_dim, output_dim),
             nn.LayerNorm(output_dim),
-            # nn.Unflatten(-1, (1, output_dim)),  # 形状→(20,1,512)
             nn.TransformerEncoder(
                 encoder_layer=nn.TransformerEncoderLayer(
                     d_model=output_dim,
@@ -38,21 +32,20 @@ class DualProjectionModel(nn.Module):
                 ),
                 num_layers=1
             ),
-            # nn.Flatten(),
-            # nn.Dropout(0.2)
         )
     
-    def load_weights(self, pretrained="/home/ljh/SemanticSegmentation/X-Agent/x_agent/modeling/backbone/final_model.pth"):
+    def load_weights(self, pretrained=None):
+        # pretrained="/home/ljh/SemanticSegmentation/X-Agent/x_agent/modeling/backbone/final_model.pth"
         if isinstance(pretrained, str):
-            checkpoint = torch.jit.load(pretrained, map_location='cpu').float().state_dict()
+            # checkpoint = torch.jit.load(pretrained, map_location='cpu').float().state_dict()
+            checkpoint = torch.load(pretrained, map_location='cpu')["model_state_dict"]
             state_dict = {}
             for k in checkpoint.keys():
                 state_dict[k] = checkpoint[k]
             u, w = self.load_state_dict(state_dict, False)
-            print(u, w, 'are misaligned params in text encoder')
+            print(u, w, '\033[1;31m are misaligned params in text projector. \033[0m')
 
     def forward(self, x):
-        # 特征归一化
         A = F.normalize(self.linear_proj(x), dim=-1)
         B = F.normalize(self.transformer_proj(x), dim=-1)
         return A, B
@@ -65,18 +58,6 @@ class DualProjectionModel(nn.Module):
         loss = (F.cross_entropy(logits, labels) + 
                 F.cross_entropy(logits.permute(0, 2, 1), labels)) / 2
         return loss
-
-
-def load_model_on_all_gpus(model, state_dict):
-    """确保所有GPU进程加载相同权重"""
-    # 主进程加载并广播
-    if dist.get_rank() == 0:
-        model.load_state_dict(state_dict, strict=False)
-    # 同步所有进程
-    dist.barrier()
-    # 广播参数
-    for param in model.parameters():
-        dist.broadcast(param.data, src=0)
 
 
 class X_Agent(nn.Module):
@@ -105,7 +86,6 @@ class X_Agent(nn.Module):
         self.scale_init = scale_init
         self.text_dim = text_dim
         self.num_heads = num_heads
-        self.create_model()
         self.sinkhornkeops = None
         if ot:
             print("\033[1;31m use optimal transportation in agent attention. \033[0m")
@@ -113,7 +93,11 @@ class X_Agent(nn.Module):
             max_iter = 100
             self.sinkhornkeops = SinkhornDistance(eps=eps, max_iter=max_iter, cost=dotmat)
         self.use_sigmoid = False
-        # self.apply(self.init_weights)
+        if text_dim == 512:
+            self.pretrained = "/home/ljh/SemanticSegmentation/X-Agent/x_agent/modeling/backbone/text_projector_b.pth"
+        elif text_dim == 768:
+            self.pretrained = "/home/ljh/SemanticSegmentation/X-Agent/x_agent/modeling/backbone/text_projector_l.pth"
+        self.create_model()
         
     def create_model(self):
         # val = math.sqrt(
@@ -140,11 +124,8 @@ class X_Agent(nn.Module):
         #     nn.Linear(self.text_dim, self.embed_dims),
         #     nn.ReLU(),
         # )
-        self.mlp_text = DualProjectionModel()
-        self.mlp_text.apply(self.mlp_text.load_weights)
-        # checkpoint = torch.load("/home/ljh/SemanticSegmentation/X-Agent/x_agent/modeling/backbone/final_model.pth")
-        # self.mlp_text.load_state_dict(checkpoint['model_state_dict'])
-        # self.mlp_text.eval()
+        self.mlp_text = DualProjectionModel(input_dim=self.text_dim, output_dim=self.embed_dims)
+        self.mlp_text.load_weights(self.pretrained)
         self.mlp_text.requires_grad_(False)
         # self.agent_attn = ResidualAgentAttentionBlock(self.embed_dims, self.num_heads)  # TODO：for agent_attention_v2
         self.agent_attn = ResidualAgentAttentionWithDiffBlock(self.embed_dims, int(self.num_heads//2))  # TODO：for agent_attention_v2
