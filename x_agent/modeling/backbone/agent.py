@@ -321,7 +321,11 @@ class X_Agent(nn.Module):
             setattr(self, "__data__", dict(
                 candidates = candidates,
                 affinity = affinity[0].permute(1, 0).reshape(-1, h, w),  # [cls, h, w]
-                # affinity = affinity,  # [cls, h, w]
+                affinity_q = torch.einsum('bld,bcd->blc', F.normalize(q, p=2, dim=-1), text_emb_normalized)[0].permute(1, 0).reshape(-1, h, w),  # [cls, h, w]
+                affinity_v = torch.einsum('bld,bcd->blc', F.normalize(v, p=2, dim=-1), text_emb_normalized)[0].permute(1, 0).reshape(-1, h, w),  # [cls, h, w]
+                k = k[0].permute(1, 0).reshape(-1, h, w),  # [embed_dims, h, w]
+                q = q[0].permute(1, 0).reshape(-1, h, w),  # [embed_dims, h, w]
+                v = v[0].permute(1, 0).reshape(-1, h, w),  # [embed_dims, h, w]
                 topk_cls = topk_cls,
                 indices = indices,
             ))
@@ -353,6 +357,10 @@ class X_Agent(nn.Module):
         text_feat = text_feat.expand(bs, -1, -1, -1)  # [bs, cls, P, text_dim]
         text_emb = self.proj_text(text_feat)  # [bs, cls, embed_dims]
         agent = self.agent_selection(m, input[0], text_emb, h, w, K=5, Q=80, batch_first=batch_first, has_cls_token=has_cls_token)  # shape: [batch, agent_length, embed_dims]
+        if getattr(self, "__VISUALIZATION__", False):
+            setattr(self, "__output__", dict(
+                affinity_output = torch.einsum('bld,bcd->blc', F.normalize(output.permute(1, 0, 2), p=2, dim=-1), F.normalize(text_emb, p=2, dim=-1))[0].permute(1, 0).reshape(-1, h, w),  # [cls, h, w]
+            ))
         agent_mask = self.agent_mask(agent, output, text_emb)
         delta_feat, _ = self.agent_attention_v2(agent_mask, output, text_emb)  # shape: [h*w, batch, embed_dims]
         output = output + delta_feat * self.agent_scale
