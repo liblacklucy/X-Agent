@@ -11,5 +11,6 @@ prepare.sh
 train.sh
 test.sh
 demo.sh
+get_flops.sh
 get_embedding.ipynb_checkpoints
 get_embedding.ipynb
