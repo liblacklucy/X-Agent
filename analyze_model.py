@@ -18,6 +18,10 @@ from detectron2.utils.analysis import (
     parameter_count_table,
 )
 from detectron2.utils.logger import setup_logger
+from detectron2.projects.deeplab import add_deeplab_config
+
+from x_agent import add_cat_seg_config
+
 
 logger = logging.getLogger("detectron2")
 
@@ -25,6 +29,8 @@ logger = logging.getLogger("detectron2")
 def setup(args):
     if args.config_file.endswith(".yaml"):
         cfg = get_cfg()
+        add_deeplab_config(cfg)
+        add_cat_seg_config(cfg)
         cfg.merge_from_file(args.config_file)
         cfg.DATALOADER.NUM_WORKERS = 0
         cfg.merge_from_list(args.opts)
