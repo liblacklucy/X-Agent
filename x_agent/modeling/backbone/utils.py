@@ -248,6 +248,30 @@ class ResidualAgentAttentionBlock(nn.Module):
         return x
     
 
+# class ResidualAgentAttentionWithDiffBlock(nn.Module):
+#     def __init__(self, d_model: int, n_head: int, attn_mask: torch.Tensor = None):
+#         super().__init__()
+#         self.cross_attn_1 = MultiheadDiffAttn(d_model, 0, n_head)
+#         self.cross_attn_2 = MultiheadDiffAttn(d_model, 0, n_head)
+#         self.ln_1 = nn.LayerNorm(d_model)
+#         self.ln_2 = nn.LayerNorm(d_model)
+#         # self.mlp = nn.Sequential(OrderedDict([
+#         #     ("c_fc", nn.Linear(d_model, d_model * 4)),
+#         #     ("gelu", nn.GELU()),
+#         #     ("c_proj", nn.Linear(d_model * 4, d_model))
+#         # ]))
+#         # self.ln_3 = nn.LayerNorm(d_model)
+#         self.attn_mask = attn_mask
+
+#     def cross_attention(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, cross_attn: nn.Module):
+#         self.attn_mask = self.attn_mask.to(dtype=q.dtype, device=q.device) if self.attn_mask is not None else None
+#         return cross_attn(q, k, v, attn_mask=self.attn_mask)
+
+#     def forward(self, agent: torch.Tensor, text: torch.Tensor, vis: torch.Tensor):
+#         v = agent + self.ln_1(self.cross_attention(agent.permute(1, 0, 2), text.permute(1, 0, 2), text.permute(1, 0, 2), self.cross_attn_1).permute(1, 0, 2))
+#         x = vis + self.ln_2(self.cross_attention(vis.permute(1, 0, 2), agent.permute(1, 0, 2), v.permute(1, 0, 2), self.cross_attn_2).permute(1, 0, 2))
+#         # x = x + self.mlp(self.ln_3(x))
+#         return x
 class ResidualAgentAttentionWithDiffBlock(nn.Module):
     def __init__(self, d_model: int, n_head: int, attn_mask: torch.Tensor = None):
         super().__init__()
@@ -255,12 +279,6 @@ class ResidualAgentAttentionWithDiffBlock(nn.Module):
         self.cross_attn_2 = MultiheadDiffAttn(d_model, 0, n_head)
         self.ln_1 = nn.LayerNorm(d_model)
         self.ln_2 = nn.LayerNorm(d_model)
-        self.mlp = nn.Sequential(OrderedDict([
-            ("c_fc", nn.Linear(d_model, d_model * 4)),
-            ("gelu", nn.GELU()),
-            ("c_proj", nn.Linear(d_model * 4, d_model))
-        ]))
-        self.ln_3 = nn.LayerNorm(d_model)
         self.attn_mask = attn_mask
 
     def cross_attention(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, cross_attn: nn.Module):
@@ -270,5 +288,4 @@ class ResidualAgentAttentionWithDiffBlock(nn.Module):
     def forward(self, agent: torch.Tensor, text: torch.Tensor, vis: torch.Tensor):
         v = agent + self.ln_1(self.cross_attention(agent.permute(1, 0, 2), text.permute(1, 0, 2), text.permute(1, 0, 2), self.cross_attn_1).permute(1, 0, 2))
         x = vis + self.ln_2(self.cross_attention(vis.permute(1, 0, 2), agent.permute(1, 0, 2), v.permute(1, 0, 2), self.cross_attn_2).permute(1, 0, 2))
-        x = x + self.mlp(self.ln_3(x))
         return x

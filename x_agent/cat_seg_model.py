@@ -15,6 +15,9 @@ from detectron2.utils.memory import _ignore_torch_cuda_oom
 
 from einops import rearrange
 
+from .utils.utils import *
+
+
 @META_ARCH_REGISTRY.register()
 class CATSeg(nn.Module):
     @configurable
@@ -86,7 +89,7 @@ class CATSeg(nn.Module):
         for l in self.layer_indexes:
             # m：当前模块（即，resblocks[l]）; _：输入（通常不需要使用，因此用_忽略）; o：输出（即该模块的前向传播结果）
             self.sem_seg_head.predictor.clip_model.visual.transformer.resblocks[l].register_forward_hook(lambda m, _, o: self.layers.append(o))
-
+        log_requires_grad(self)
 
     @classmethod
     def from_config(cls, cfg):

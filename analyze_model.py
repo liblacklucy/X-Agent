@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 # Copyright (c) Facebook, Inc. and its affiliates.
 
+import torch
 import logging
 import numpy as np
 from collections import Counter
@@ -58,7 +59,8 @@ def do_flop(cfg):
     counts = Counter()
     total_flops = []
     for idx, data in zip(tqdm.trange(args.num_inputs), data_loader):  # noqa
-        flops = FlopCountAnalysis(model, data)
+        with torch.no_grad():
+            flops = FlopCountAnalysis(model, data)
         if idx > 0:
             flops.unsupported_ops_warnings(False).uncalled_modules_warnings(False)
         counts += flops.by_operator()

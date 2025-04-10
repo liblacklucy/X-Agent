@@ -19,7 +19,7 @@ def log_requires_grad(model: nn.Module):
         if param.requires_grad == True:
             requires_grad_names.append(name)
             num_trainable += param.numel()
-            if "transformer" not in name:
+            if "clip_model" not in name:
                 num_trainable_exclude_clip += param.numel()
     global first_set_requires_grad
     if first_set_requires_grad:

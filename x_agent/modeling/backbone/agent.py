@@ -35,6 +35,7 @@ class DualProjectionModel(nn.Module):
         )
     
     def load_weights(self, pretrained=None):
+        # print(pretrained)
         # pretrained="/home/ljh/SemanticSegmentation/X-Agent/x_agent/modeling/backbone/final_model.pth"
         if isinstance(pretrained, str):
             # checkpoint = torch.jit.load(pretrained, map_location='cpu').float().state_dict()
@@ -356,7 +357,13 @@ class X_Agent(nn.Module):
         _, bs, _ = output.shape
         text_feat = text_feat.expand(bs, -1, -1, -1)  # [bs, cls, P, text_dim]
         text_emb = self.proj_text(text_feat)  # [bs, cls, embed_dims]
-        agent = self.agent_selection(m, input[0], text_emb, h, w, K=5, Q=80, batch_first=batch_first, has_cls_token=has_cls_token)  # shape: [batch, agent_length, embed_dims]
+        if not m.training:  # 测试模式
+            top_k = 10
+            top_q = 4
+        else:
+            top_k = 5
+            top_q = 80
+        agent = self.agent_selection(m, input[0], text_emb, h, w, K=top_k, Q=top_q, batch_first=batch_first, has_cls_token=has_cls_token)  # shape: [batch, agent_length, embed_dims] for training,k=5,q=80
         if getattr(self, "__VISUALIZATION__", False):
             setattr(self, "__output__", dict(
                 affinity_output = torch.einsum('bld,bcd->blc', F.normalize(output.permute(1, 0, 2), p=2, dim=-1), F.normalize(text_emb, p=2, dim=-1))[0].permute(1, 0).reshape(-1, h, w),  # [cls, h, w]
