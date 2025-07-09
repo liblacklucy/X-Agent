@@ -1,10 +1,5 @@
 ## :fire:TODO
-- [x] Train/Evaluation Code (Mar 21, 2023)
-- [x] Pre-trained weights (Mar 30, 2023)
-- [x] Code of interactive demo (Jul 13, 2023)
-- [x] Release code for CVPR version (Apr 4, 2024)
-- [x] Release checkpoints for CVPR version (Apr 11, 2024)
-- [ ] Demo update
+- [x] Train/Evaluation Code
 
 ## Installation
 Please follow [installation](INSTALL.md). 
