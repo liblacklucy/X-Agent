@@ -2,7 +2,7 @@
 
 Authors: Jiahao Li, Yang Lu, Yachao Zhang, Fangyong Wang, Yuan Xie*, Yanyun Qu*.     *Corresponding author
 
-[[paper]()] 
+[[paper](http://arxiv.org/abs/2509.01275)] 
 
 > **Abstract: Open-vocabulary semantic segmentation (OVSS) conducts pixel-level classification via text-driven alignment, where the domain discrepancy between base category training and open-vocabulary inference poses challenges in discriminative modeling of latent unseen category. To address this challenge, existing vision-language model (VLM)-based approaches demonstrate commendable performance through pre-trained multi-modal representations. However, the fundamental mechanisms of latent semantic comprehension remain underexplored, making the bottleneck for OVSS. In this work, we initiate a probing experiment to explore distribution patterns and dynamics of latent semantics in VLMs under inductive learning paradigms. Building on these insights, we propose X-Agent, an innovative OVSS framework employing latent semantic-aware ``agent'' to orchestrate cross-modal attention mechanisms, simultaneously optimizing latent semantic dynamic and amplifying its perceptibility. Extensive benchmark evaluations demonstrate that X-Agent achieves state-of-the-art performance while effectively enhancing the latent semantic saliency.** 
 >
